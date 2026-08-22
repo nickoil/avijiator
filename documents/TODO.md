@@ -8,17 +8,20 @@ fallback, not the daily driver).
 
 ## 0. Tooling setup
 
-- [ ] Install VS Code extensions: C/C++ (ms-vscode.cpptools), CMake Tools
-- [ ] Install Visual Studio Build Tools — "Desktop development with C++"
+- [x] Install VS Code extensions: C/C++ (ms-vscode.cpptools), CMake Tools
+- [x] Install Visual Studio Build Tools — "Desktop development with C++"
       workload only (headless compiler/linker/MSVC debugger engine, not the
       Visual Studio IDE)
-- [ ] Get JUCE source (submodule or CMake `FetchContent`)
-- [ ] Write root `CMakeLists.txt`: `juce_add_gui_app` standalone target,
-      link required JUCE modules (audio basics, DSP, GUI)
-- [ ] Set static MSVC runtime linking (`/MT` instead of default `/MD`) via
+- [x] Get JUCE source (submodule or CMake `FetchContent`) — used a git
+      submodule pinned to tag `9.0.1` at `libs/JUCE`
+- [x] Write root `CMakeLists.txt`: `juce_add_gui_app` standalone target,
+      link required JUCE modules (audio basics, DSP, GUI) — configure-only
+      check passes (VS 17 2022 generator); build/run/sound is Stage A item 1
+- [x] Set static MSVC runtime linking (`/MT` instead of default `/MD`) via
       `MSVC_RUNTIME_LIBRARY` target property — needed for true single-exe
       distribution with no Visual C++ Redistributable dependency on the
-      target machine
+      target machine — verified in generated .vcxproj: MultiThreaded(Debug)
+      for Debug, MultiThreaded (/MT) for Release/RelWithDebInfo/MinSizeRel
 - [ ] Confirm CMake Tools can configure, build, run, and **debug**
       (breakpoint + step) a trivial JUCE app before writing real DSP
 

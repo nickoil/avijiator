@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1060" viewBox="0 0 1680 1060">
+  <defs>
+    <marker id="arrowAudio" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C8542B"/>
+    </marker>
+    <marker id="arrowMod" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2E6E8E"/>
+    </marker>
+    <marker id="arrowCtrl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6B6660"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1680" height="1060" fill="#F7F6F3"/>
+
+  <!-- ===== Title ===== -->
+  <text x="60" y="66" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="31" font-weight="600" fill="#1F1D1B">Avijiator — Signal Flow</text>
+  <text x="60" y="94" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="16" fill="#6B6660">Monophonic SH-101 / TB-303-style voice · JUCE standalone</text>
+
+  <!-- ===== BAND 1: NOTE SOURCE ===== -->
+  <text x="60" y="156" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="13" font-weight="700" letter-spacing="1.6" fill="#9A948C">NOTE SOURCE</text>
+
+  <rect x="60" y="180" width="200" height="60" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="160" y="206" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">MIDI Keyboard</text>
+  <text x="160" y="225" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">USB / Bluetooth</text>
+
+  <rect x="60" y="265" width="200" height="60" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="160" y="291" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">Internal Clock</text>
+  <text x="160" y="310" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">tempo · no host sync</text>
+
+  <rect x="340" y="180" width="220" height="60" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="450" y="206" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">Arpeggiator</text>
+  <text x="450" y="225" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">up / down / random / as-played</text>
+  <rect x="566" y="192" width="66" height="19" rx="9.5" fill="#E8EFE2" stroke="#6B7F3A" stroke-width="1"/>
+  <text x="599" y="206" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="11" font-weight="700" letter-spacing="0.6" fill="#4F6129">PHASE 1</text>
+
+  <rect x="340" y="265" width="220" height="60" rx="5" fill="#FFFFFF" stroke="#8A857D" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="450" y="291" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#5C5751">Step Sequencer</text>
+  <text x="450" y="310" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#8A857D">16 steps · accent · slide</text>
+  <rect x="566" y="277" width="66" height="19" rx="9.5" fill="#F0EEEA" stroke="#8A857D" stroke-width="1"/>
+  <text x="599" y="291" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="11" font-weight="700" letter-spacing="0.6" fill="#6B6660">PHASE 2</text>
+
+  <rect x="650" y="222" width="230" height="60" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="765" y="248" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">Mono Note Priority</text>
+  <text x="765" y="267" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">last-note or highest-note</text>
+
+  <!-- Band 1 wiring -->
+  <path d="M260,210 H332" fill="none" stroke="#6B6660" stroke-width="1.7" marker-end="url(#arrowCtrl)"/>
+  <path d="M260,295 H332" fill="none" stroke="#6B6660" stroke-width="1.7" marker-end="url(#arrowCtrl)"/>
+  <path d="M300,295 V228 H332" fill="none" stroke="#6B6660" stroke-width="1.7" marker-end="url(#arrowCtrl)"/>
+  <circle cx="300" cy="295" r="4" fill="#6B6660"/>
+  <path d="M560,210 H605 V252 H642" fill="none" stroke="#6B6660" stroke-width="1.7" marker-end="url(#arrowCtrl)"/>
+  <path d="M560,295 H605 V252" fill="none" stroke="#6B6660" stroke-width="1.7"/>
+  <circle cx="605" cy="252" r="4" fill="#6B6660"/>
+
+  <!-- ===== CONTROL BUS ===== -->
+  <path d="M765,282 V350" fill="none" stroke="#6B6660" stroke-width="1.7"/>
+  <path d="M118,350 H820" fill="none" stroke="#6B6660" stroke-width="2.4"/>
+  <circle cx="765" cy="350" r="4.5" fill="#6B6660"/>
+  <rect x="118" y="322" width="232" height="22" rx="4" fill="#F7F6F3"/>
+  <text x="120" y="339" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="13" font-weight="700" letter-spacing="1.4" fill="#6B6660">PITCH · GATE · ACCENT</text>
+
+  <!-- ===== BAND 2: AUDIO PATH ===== -->
+  <text x="150" y="424" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="13" font-weight="700" letter-spacing="1.6" fill="#9A948C">AUDIO PATH</text>
+
+  <!-- pitch rail -->
+  <path d="M118,350 V745" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4"/>
+  <path d="M118,477 H142" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <path d="M118,542 H142" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <path d="M118,607 H142" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <text x="112" y="432" text-anchor="end" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" font-style="italic" fill="#2E6E8E">pitch</text>
+
+  <rect x="150" y="450" width="200" height="54" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="250" y="473" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="16" font-weight="600" fill="#1F1D1B">Saw</text>
+  <text x="250" y="491" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" fill="#6B6660">PolyBLEP</text>
+
+  <rect x="150" y="515" width="200" height="54" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="250" y="538" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="16" font-weight="600" fill="#1F1D1B">Square / Pulse</text>
+  <text x="250" y="556" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" fill="#6B6660">PolyBLEP · PWM</text>
+
+  <rect x="150" y="580" width="200" height="54" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="250" y="603" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="16" font-weight="600" fill="#1F1D1B">Sub Oscillator</text>
+  <text x="250" y="621" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" fill="#6B6660">square · one octave down</text>
+
+  <rect x="150" y="645" width="200" height="54" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="250" y="668" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="16" font-weight="600" fill="#1F1D1B">Noise</text>
+  <text x="250" y="686" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" fill="#6B6660">white</text>
+
+  <!-- osc -> mixer -->
+  <path d="M350,477 H390 V575 H422" fill="none" stroke="#C8542B" stroke-width="2" marker-end="url(#arrowAudio)"/>
+  <path d="M350,542 H390 V575" fill="none" stroke="#C8542B" stroke-width="2"/>
+  <path d="M350,607 H390 V575" fill="none" stroke="#C8542B" stroke-width="2"/>
+  <path d="M350,672 H390 V575" fill="none" stroke="#C8542B" stroke-width="2"/>
+
+  <rect x="430" y="505" width="110" height="140" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="485" y="569" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">MIX</text>
+  <text x="485" y="590" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" fill="#6B6660">source</text>
+  <text x="485" y="606" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" fill="#6B6660">levels</text>
+
+  <rect x="620" y="530" width="210" height="90" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="725" y="566" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="20" font-weight="700" fill="#1F1D1B">VCF</text>
+  <text x="725" y="588" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">SVF · 24 dB resonant lowpass</text>
+  <text x="725" y="606" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">self-oscillates at max resonance</text>
+
+  <rect x="900" y="530" width="180" height="90" rx="5" fill="#FFFFFF" stroke="#33312E" stroke-width="1.6"/>
+  <text x="990" y="572" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="20" font-weight="700" fill="#1F1D1B">VCA</text>
+  <text x="990" y="594" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">amplitude</text>
+
+  <rect x="1150" y="530" width="180" height="90" rx="5" fill="#FFFFFF" stroke="#C8542B" stroke-width="2.4"/>
+  <text x="1240" y="572" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="20" font-weight="700" fill="#C8542B">OUTPUT</text>
+  <text x="1240" y="594" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">mono</text>
+
+  <path d="M540,575 H612" fill="none" stroke="#C8542B" stroke-width="2.4" marker-end="url(#arrowAudio)"/>
+  <path d="M830,575 H892" fill="none" stroke="#C8542B" stroke-width="2.4" marker-end="url(#arrowAudio)"/>
+  <path d="M1080,575 H1142" fill="none" stroke="#C8542B" stroke-width="2.4" marker-end="url(#arrowAudio)"/>
+  <path d="M1330,575 H1420" fill="none" stroke="#C8542B" stroke-width="2.4" marker-end="url(#arrowAudio)"/>
+  <text x="1432" y="571" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">USB audio interface</text>
+  <text x="1432" y="588" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">→ mixer / PA</text>
+
+  <!-- ===== BAND 3: MODULATION ===== -->
+  <text x="150" y="790" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="13" font-weight="700" letter-spacing="1.6" fill="#9A948C">MODULATION</text>
+
+  <rect x="150" y="810" width="230" height="76" rx="5" fill="#FFFFFF" stroke="#2E6E8E" stroke-width="1.6"/>
+  <text x="265" y="838" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">Glide / Portamento</text>
+  <text x="265" y="858" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">legato vs. retrigger mode</text>
+  <text x="265" y="875" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">slide steps glide, no retrigger</text>
+
+  <rect x="480" y="810" width="250" height="76" rx="5" fill="#FFFFFF" stroke="#2E6E8E" stroke-width="1.6"/>
+  <text x="605" y="838" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">ADSR — single, shared</text>
+  <text x="605" y="858" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">→ VCF and / or VCA</text>
+  <text x="605" y="875" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">(routing switch)</text>
+
+  <rect x="830" y="810" width="250" height="76" rx="5" fill="#FFFFFF" stroke="#2E6E8E" stroke-width="1.6"/>
+  <text x="955" y="838" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="17" font-weight="600" fill="#1F1D1B">LFO</text>
+  <text x="955" y="858" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">triangle / square / random</text>
+  <text x="955" y="875" text-anchor="middle" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" fill="#6B6660">→ pitch and / or cutoff</text>
+
+  <!-- Modulation routing -->
+  <path d="M265,810 V730 H126" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <path d="M880,886 V925 H118 V745" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <path d="M955,810 V690 H725 V628" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <path d="M560,810 V670 H680 V628" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <path d="M650,810 V655 H990 V628" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+
+  <!-- gate tap from control bus to ADSR -->
+  <path d="M410,350 V838 H472" fill="none" stroke="#6B6660" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowCtrl)"/>
+  <circle cx="410" cy="350" r="4.5" fill="#6B6660"/>
+  <text x="402" y="706" text-anchor="end" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12" font-style="italic" fill="#6B6660">gate</text>
+
+  <!-- ===== Footnote ===== -->
+  <rect x="150" y="960" width="880" height="56" rx="5" fill="#FBF3EC" stroke="#D9BFA8" stroke-width="1.3"/>
+  <text x="170" y="983" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="13.5" font-weight="600" fill="#8A4A22">One ADSR serves both VCF and VCA — the SH-101&#8217;s shared-envelope quirk.</text>
+  <text x="170" y="1002" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="13" fill="#6B6660">Deliberate constraint, not a limitation to design around. Accent raises velocity → envelope amount, cutoff and level.</text>
+
+  <!-- ===== Legend ===== -->
+  <rect x="1150" y="800" width="430" height="150" rx="5" fill="#FFFFFF" stroke="#D5D1CA" stroke-width="1.3"/>
+  <text x="1174" y="830" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="12.5" font-weight="700" letter-spacing="1.4" fill="#9A948C">LEGEND</text>
+
+  <path d="M1174,858 H1244" fill="none" stroke="#C8542B" stroke-width="2.4" marker-end="url(#arrowAudio)"/>
+  <text x="1262" y="863" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="14" fill="#1F1D1B">Audio signal</text>
+
+  <path d="M1174,890 H1244" fill="none" stroke="#2E6E8E" stroke-width="1.7" stroke-dasharray="7 4" marker-end="url(#arrowMod)"/>
+  <text x="1262" y="895" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="14" fill="#1F1D1B">Modulation</text>
+
+  <path d="M1174,922 H1244" fill="none" stroke="#6B6660" stroke-width="1.7" marker-end="url(#arrowCtrl)"/>
+  <text x="1262" y="927" font-family="Segoe UI, DejaVu Sans, sans-serif" font-size="14" fill="#1F1D1B">Note / control</text>
+</svg>

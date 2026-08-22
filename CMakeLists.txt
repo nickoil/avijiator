@@ -1,0 +1,61 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(Avijiator VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Static MSVC runtime (/MT, /MTd for Debug) — single-exe distribution, no
+# Visual C++ Redistributable required on the target machine. Set globally,
+# before add_subdirectory(JUCE), so JUCE's own targets link consistently
+# with ours rather than mixing /MD and /MT in the same build.
+if (MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+# JUCE is vendored as a git submodule pinned to a release tag — see
+# libs/JUCE and .gitmodules. Do not `find_package(JUCE)` against a system
+# install; this project builds against the pinned copy only.
+add_subdirectory(libs/JUCE)
+
+# Standalone GUI app target — no VST/AU wrapper, no DAW host required.
+juce_add_gui_app(Avijiator
+    PRODUCT_NAME "Avijiator"
+    COMPANY_NAME "Nick Casey"
+    BUNDLE_ID "com.nickcasey.avijiator"
+    NEEDS_WEB_BROWSER FALSE
+    NEEDS_CURL FALSE)
+
+target_sources(Avijiator
+    PRIVATE
+        Source/Main.cpp
+        Source/MainComponent.cpp)
+
+target_compile_definitions(Avijiator
+    PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Avijiator,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Avijiator,JUCE_VERSION>")
+
+# Module set: audio basics/devices/formats/utils for the standalone audio
+# app + MIDI input, dsp for filter/oscillator building blocks, gui_basics/
+# gui_extra for the control UI (item 6). Their own dependencies (core,
+# events, graphics, ...) are pulled in transitively.
+target_link_libraries(Avijiator
+    PRIVATE
+        juce::juce_audio_basics
+        juce::juce_audio_devices
+        juce::juce_audio_formats
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_gui_basics
+        juce::juce_gui_extra
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
+# NOTE: static MSVC runtime linking (/MT via MSVC_RUNTIME_LIBRARY) is a
+# separate TODO item — deliberately not set here yet.
