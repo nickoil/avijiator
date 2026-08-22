@@ -30,7 +30,14 @@ juce_add_gui_app(Avijiator
 target_sources(Avijiator
     PRIVATE
         Source/Main.cpp
-        Source/MainComponent.cpp)
+        Source/MainComponent.cpp
+        Source/DSP/SynthVoice.cpp)
+
+# Quoted includes already resolve relative to the including file, so this is
+# convenience, not a requirement. Keep writing includes in relative form
+# anyway - the Stage B .jucer exporter sets its own header search paths
+# (CLAUDE.md), and relative includes port without touching it.
+target_include_directories(Avijiator PRIVATE Source)
 
 target_compile_definitions(Avijiator
     PRIVATE
@@ -57,5 +64,3 @@ target_link_libraries(Avijiator
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-# NOTE: static MSVC runtime linking (/MT via MSVC_RUNTIME_LIBRARY) is a
-# separate TODO item — deliberately not set here yet.

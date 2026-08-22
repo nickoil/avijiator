@@ -55,6 +55,11 @@ Modulation:
 This voice is the shared core for both the arp and step-sequencer front ends —
 same oscillator/filter/envelope code, different things trigger it.
 
+The oscillator and filter are specified in detail — PolyBLEP math, TPT SVF
+coefficients, the resonance/self-oscillation derivation, parameter smoothing and
+the modulation insertion points — in
+[dsp-voice-design.md](dsp-voice-design.md).
+
 ## Note input: arpeggiator vs. step sequencer
 
 Both considered; **decision: build the arpeggiator first**, add step sequencer later
@@ -168,7 +173,12 @@ Powered USB-C hub
 ## Open decisions / things to verify hands-on
 
 - Exact filter topology (SVF cascade vs. ladder emulation) — start with SVF,
-  it's easier to get right, revisit if it doesn't have enough character
+  it's easier to get right, revisit if it doesn't have enough character.
+  **Still open.** Item 2 builds it from SVF stages, but fixes each stage at
+  critical damping and puts resonance in a global feedback loop, which gives
+  ladder-equivalent pole placement (`1/(s+1)^4`). Topology is SVF; response is
+  ladder-like. If it lacks character the first move is the drive stage, not a
+  topology rewrite — see [dsp-voice-design.md](dsp-voice-design.md)
 - Note-priority scheme for the mono voice (last-note vs. highest-note) — try
   both, keep whichever feels right by ear
 - Whether the interface + hub + phone power chain is actually stable under

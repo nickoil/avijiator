@@ -35,7 +35,8 @@ Build/validate everything here before touching Android.
       440Hz test tone via AudioAppComponent. **Audible confirmation is yours
       to make** — I can't hear it.
 - [ ] **2. Oscillator + filter core** — saw/square + sub + noise mix →
-      resonant lowpass; A/B against reference SH-101 recordings
+      resonant lowpass; A/B against reference SH-101 recordings.
+      Design + build order: [dsp-voice-design.md](dsp-voice-design.md)
 - [ ] **3. Envelope + LFO** — shared ADSR routing (filter/amp/both), LFO →
       pitch and/or filter cutoff
 - [ ] **4. Mono note handling** — note-priority logic, glide/legato vs.
@@ -46,6 +47,18 @@ Build/validate everything here before touching Android.
       keep touch-first layout decisions in mind even though untested
 - [ ] **7. Step sequencer (phase 2)** — 16-step (page-able) pattern, per-step
       pitch/gate/accent/slide, shared clock/trigger plumbing with the arp
+
+### Voice follow-ups (deferred out of item 2, not numbered — no reordering)
+
+- [ ] **Filter drive / saturation** — soft-clip in the VCF's global feedback
+      path, for character. Item 2 deliberately ships a vanilla signal so the
+      SH-101 A/B tests one variable at a time; the topology is built to take
+      this as a one-line change. **This is the first thing to try if the
+      filter lacks character** — before considering a ladder rewrite
+- [ ] **DC blocker after the mixer** — one-pole highpass. A pulse of duty `w`
+      carries DC of `2w-1`; real hardware AC-couples it away. Harmless with a
+      static pulse width, but **needed before item 3 sweeps PWM with the
+      LFO**, or the moving DC thumps
 
 ## 2. Stage B — Android (port)
 
