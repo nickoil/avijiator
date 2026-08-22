@@ -22,15 +22,18 @@ fallback, not the daily driver).
       distribution with no Visual C++ Redistributable dependency on the
       target machine — verified in generated .vcxproj: MultiThreaded(Debug)
       for Debug, MultiThreaded (/MT) for Release/RelWithDebInfo/MinSizeRel
-- [ ] Confirm CMake Tools can configure, build, run, and **debug**
+- [x] Confirm CMake Tools can configure, build, run, and **debug**
       (breakpoint + step) a trivial JUCE app before writing real DSP
 
 ## 1. Stage A — Windows (dev)
 
 Build/validate everything here before touching Android.
 
-- [ ] **1. Environment check** — minimal JUCE Windows standalone app builds,
-      runs, makes sound
+- [x] **1. Environment check** — minimal JUCE Windows standalone app builds,
+      runs, makes sound — builds clean (Debug, VS 17 2022 generator), launches
+      and stays up with no crash/stderr output; MainComponent plays a fixed
+      440Hz test tone via AudioAppComponent. **Audible confirmation is yours
+      to make** — I can't hear it.
 - [ ] **2. Oscillator + filter core** — saw/square + sub + noise mix →
       resonant lowpass; A/B against reference SH-101 recordings
 - [ ] **3. Envelope + LFO** — shared ADSR routing (filter/amp/both), LFO →

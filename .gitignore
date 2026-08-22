@@ -1,0 +1,11 @@
+# CMake build tree
+build/
+out/
+
+# Visual Studio / MSVC
+.vs/
+*.vcxproj.user
+
+# VS Code CMake Tools cache
+.cache/
+CMakeUserPresets.json
