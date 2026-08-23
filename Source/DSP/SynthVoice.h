@@ -2,20 +2,19 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include "PolyBlepOscillator.h"
 #include "VoiceParameters.h"
 #include "Vca.h"
 
 //==============================================================================
 /*
-    The voice core: no MIDI, no timers, no tempo, no juce::AudioBuffer - takes
+    The voice core: no MIDI, no timers, no tempo, no juce::AudioBuffer — takes
     numbers, produces samples. This is the reuse boundary shared by the arp
-    (item 5) and step sequencer (item 7) front ends - see
+    (item 5) and step sequencer (item 7) front ends — see
     documents/dsp-voice-design.md section 6.
 
-    Step 1: a naive (deliberately aliased) saw at a fixed test pitch, straight
-    into the VCA. No filter yet (arrives item 5/step 5), no real oscillator
-    yet (arrives item 2/step 2) - this naive saw is the "before" reference for
-    the aliasing A/B that step is meant to pass.
+    Step 2 (Saw): band-limited saw -> VCA. No pulse/sub/noise yet (steps 3-4),
+    no filter yet (steps 5-6).
 */
 class SynthVoice
 {
@@ -35,17 +34,20 @@ public:
 private:
     void snapshotParameters (bool jumpImmediately) noexcept;
 
-    // Placeholder pitch until item 2's real oscillator + Pitch slider land.
-    static constexpr double testOscillatorFrequencyHz = 110.0;
+    using Smoothed = juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>;
+
     static constexpr double rampSeconds = 0.02;
 
     VoiceParameters parameters;
+    PolyBlepOscillator oscillator;
 
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> outputLevelSmoothed;
-
-    double sampleRate = 0.0;
-    double phase = 0.0;
-    double phaseIncrement = 0.0;
+    // Linear smoothing on a log2(Hz) value IS multiplicative smoothing of the
+    // frequency, which is the musically correct sweep - and it sidesteps
+    // ValueSmoothingTypes::Multiplicative's strictly-positive constraint. One
+    // smoother type everywhere.
+    Smoothed pitchLog2Smoothed;
+    Smoothed sawLevelSmoothed;
+    Smoothed outputLevelSmoothed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)
 };

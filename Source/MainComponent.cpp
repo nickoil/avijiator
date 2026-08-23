@@ -1,20 +1,53 @@
 #include "MainComponent.h"
 
+#include <cmath>
+
+//==============================================================================
+// Ordered top-to-bottom as they appear in the window. Later build steps insert
+// rows here (Pulse, Pulse width, Sub, Noise, Cutoff, Resonance) and bump
+// numDebugControls to match.
+const MainComponent::DebugControlSpec MainComponent::debugControlSpecs[numDebugControls] =
+{
+    { "Pitch", 20.0, 2000.0, 87.31, true,  &VoiceParameters::pitchLog2Hz },
+    { "Saw",    0.0,    1.0,  0.70, false, &VoiceParameters::sawLevel    },
+    { "Level",  0.0,    1.0,  0.25, false, &VoiceParameters::outputLevel },
+};
+
 MainComponent::MainComponent()
 {
-    levelLabel.setText ("Level", juce::dontSendNotification);
-    levelLabel.setColour (juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible (levelLabel);
-
-    levelSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    levelSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 20);
-    levelSlider.setRange (0.0, 1.0);
-    levelSlider.setValue (0.25, juce::dontSendNotification);
-    levelSlider.onValueChange = [this]
+    for (int i = 0; i < numDebugControls; ++i)
     {
-        voice.getParameters().outputLevel.store ((float) levelSlider.getValue(), std::memory_order_relaxed);
-    };
-    addAndMakeVisible (levelSlider);
+        const auto& spec = debugControlSpecs[i];
+        auto& control = debugControls[(size_t) i];
+
+        control.label.setText (spec.name, juce::dontSendNotification);
+        control.label.setColour (juce::Label::textColourId, juce::Colours::white);
+        addAndMakeVisible (control.label);
+
+        control.slider.setSliderStyle (juce::Slider::LinearHorizontal);
+        control.slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 20);
+        control.slider.setRange (spec.minimum, spec.maximum);
+
+        // Hz-valued controls get a log-ish taper so the useful low end isn't
+        // crammed into the first few pixels of travel.
+        if (spec.storeAsLog2)
+            control.slider.setSkewFactorFromMidPoint (std::sqrt (spec.minimum * spec.maximum));
+
+        control.slider.setValue (spec.defaultValue, juce::dontSendNotification);
+        addAndMakeVisible (control.slider);
+
+        control.slider.onValueChange = [this, &spec, &control]
+        {
+            const auto value = (float) control.slider.getValue();
+
+            (voice.getParameters().*spec.target)
+                .store (spec.storeAsLog2 ? std::log2 (value) : value, std::memory_order_relaxed);
+        };
+
+        // Seed the atomics from the table so the sliders and the voice cannot
+        // disagree at startup - VoiceParameters' own defaults are a fallback.
+        control.slider.onValueChange();
+    }
 
     setSize (600, 400);
     setAudioChannels (0, 2); // no input, stereo out
@@ -35,9 +68,9 @@ void MainComponent::prepareToPlay (int /*samplesPerBlockExpected*/, double sampl
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
 {
-    // Denormals in filter integrator states (from item 2 step 5 onward) cost
-    // hundreds of cycles per sample once the voice decays toward silence -
-    // flush them to zero. Required from the start, not added later.
+    // Denormals in filter integrator states (from step 5 onward) cost hundreds
+    // of cycles per sample once the voice decays toward silence - flush them
+    // to zero.
     const juce::ScopedNoDenormals noDenormals;
 
     auto* buffer = bufferToFill.buffer;
@@ -47,9 +80,8 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
     if (buffer->getNumChannels() == 0)
         return;
 
-    // Mono voice: render once into channel 0, then fan out. Item 5 splits
-    // this single call into per-step sub-blocks - the signature already
-    // allows it.
+    // Mono voice: render once into channel 0, then fan out. Item 5 splits this
+    // single call into per-step sub-blocks - the signature already allows it.
     auto* mono = buffer->getWritePointer (0, startSample);
     voice.renderNextBlock (mono, numSamples);
 
@@ -68,7 +100,8 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (16.0f);
-    g.drawFittedText ("Item 2 step 1: plumbing proven. Naive saw through a working Level control.",
+    g.drawFittedText ("Item 2 step 2 (Saw): PolyBLEP saw. Sweep Pitch upward and listen for "
+                      "aliasing - there should be none.",
                        getLocalBounds().removeFromTop (60).reduced (20),
                        juce::Justification::centred,
                        2);
@@ -79,7 +112,12 @@ void MainComponent::resized()
     auto area = getLocalBounds().reduced (20);
     area.removeFromTop (60); // banner text
 
-    auto row = area.removeFromTop (24);
-    levelLabel.setBounds (row.removeFromLeft (80));
-    levelSlider.setBounds (row);
+    for (auto& control : debugControls)
+    {
+        auto row = area.removeFromTop (24);
+        control.label.setBounds (row.removeFromLeft (90));
+        control.slider.setBounds (row);
+
+        area.removeFromTop (6); // gap between rows
+    }
 }

@@ -31,6 +31,7 @@ target_sources(Avijiator
     PRIVATE
         Source/Main.cpp
         Source/MainComponent.cpp
+        Source/DSP/PolyBlepOscillator.cpp
         Source/DSP/SynthVoice.cpp)
 
 # Quoted includes already resolve relative to the including file, so this is

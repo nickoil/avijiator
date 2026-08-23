@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -9,9 +11,8 @@
 /*
     Top-level content component.
 
-    Item 2 step 1 (plumbing): renders SynthVoice's placeholder naive saw
-    through a working Level control. No PolyBLEP oscillator, no filter yet -
-    see documents/dsp-voice-design.md for the full build order.
+    Item 2 step 2 (Saw): band-limited saw with Pitch, Saw and Level controls.
+    See documents/dsp-voice-design.md for the full build order.
 */
 class MainComponent final : public juce::AudioAppComponent
 {
@@ -29,10 +30,31 @@ public:
     void resized() override;
 
 private:
-    SynthVoice voice;
+    //==============================================================================
+    // Throwaway auditioning scaffolding. Item 6 is the real UI pass and none of
+    // this survives it - deliberately unstyled, and driven by one spec table
+    // plus one loop so later steps add a row rather than more copy-paste.
+    struct DebugControl
+    {
+        juce::Slider slider;
+        juce::Label label;
+    };
 
-    juce::Slider levelSlider;
-    juce::Label levelLabel;
+    struct DebugControlSpec
+    {
+        const char* name;
+        double minimum, maximum, defaultValue;
+        bool storeAsLog2;                             // true for Hz-valued controls
+        std::atomic<float> VoiceParameters::* target;
+    };
+
+    // Sizing the definition to this count makes the compiler enforce that the
+    // table and the array stay in step.
+    static constexpr int numDebugControls = 3;
+    static const DebugControlSpec debugControlSpecs[numDebugControls];
+
+    SynthVoice voice;
+    std::array<DebugControl, numDebugControls> debugControls;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
