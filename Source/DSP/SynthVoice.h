@@ -13,8 +13,8 @@
     (item 5) and step sequencer (item 7) front ends — see
     documents/dsp-voice-design.md section 6.
 
-    Step 2 (Saw): band-limited saw -> VCA. No pulse/sub/noise yet (steps 3-4),
-    no filter yet (steps 5-6).
+    Step 3 (Pulse): band-limited saw + pulse/PWM -> VCA. No sub or noise yet
+    (step 4), no filter yet (steps 5-6).
 */
 class SynthVoice
 {
@@ -47,6 +47,8 @@ private:
     // smoother type everywhere.
     Smoothed pitchLog2Smoothed;
     Smoothed sawLevelSmoothed;
+    Smoothed pulseLevelSmoothed;
+    Smoothed pulseWidthSmoothed;
     Smoothed outputLevelSmoothed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)

@@ -8,6 +8,8 @@ void SynthVoice::prepare (double newSampleRate)
 
     pitchLog2Smoothed.reset (newSampleRate, rampSeconds);
     sawLevelSmoothed.reset (newSampleRate, rampSeconds);
+    pulseLevelSmoothed.reset (newSampleRate, rampSeconds);
+    pulseWidthSmoothed.reset (newSampleRate, rampSeconds);
     outputLevelSmoothed.reset (newSampleRate, rampSeconds);
 
     snapshotParameters (true); // jump straight to target - block 1 shouldn't ramp up from zero
@@ -30,6 +32,8 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
 
     apply (pitchLog2Smoothed,   parameters.pitchLog2Hz .load (std::memory_order_relaxed));
     apply (sawLevelSmoothed,    parameters.sawLevel    .load (std::memory_order_relaxed));
+    apply (pulseLevelSmoothed,  parameters.pulseLevel  .load (std::memory_order_relaxed));
+    apply (pulseWidthSmoothed,  parameters.pulseWidth  .load (std::memory_order_relaxed));
     apply (outputLevelSmoothed, parameters.outputLevel .load (std::memory_order_relaxed));
 }
 
@@ -55,12 +59,14 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
 
         const auto pitchOctaves = pitchLog2Smoothed.getNextValue() + pitchModulationOctaves;
         oscillator.setFrequency (std::exp2 (pitchOctaves));
+        oscillator.setPulseWidth (pulseWidthSmoothed.getNextValue());
 
         const auto frame = oscillator.processSample();
 
-        // Source mixer - one term for now. Pulse, sub and noise join at steps
-        // 3 and 4, each with its own independent level.
-        const auto mix = frame.saw * sawLevelSmoothed.getNextValue();
+        // Source mixer - independent level per source, per the SH-101's four
+        // mixer sliders. Sub and noise join at step 4.
+        const auto mix = frame.saw   * sawLevelSmoothed.getNextValue()
+                       + frame.pulse * pulseLevelSmoothed.getNextValue();
 
         output[i] = Vca::processSample (mix, outputLevelSmoothed.getNextValue(), amplitudeModulation);
     }

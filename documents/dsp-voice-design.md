@@ -375,8 +375,9 @@ that own zero DSP and only call those methods at sample offsets.
 ### Debug slider scaffolding — throwaway
 
 Item 2 has no note input (that's item 4), so the voice drones continuously and is
-auditioned with nine plain sliders: **Pitch, Saw, Pulse, Sub, Noise, Pulse width,
-Cutoff, Resonance, Level**.
+auditioned with nine plain sliders: **Pitch, Saw, Pulse, Pulse width, Sub, Noise,
+Cutoff, Resonance, Level** — Pulse width sits next to Pulse rather than after Noise,
+since the two are always adjusted together when auditioning.
 
 These are deliberately unstyled and explicitly disposable — **item 6 is the real UI
 pass and none of this survives it**. To keep them from sprawling, they're driven by a

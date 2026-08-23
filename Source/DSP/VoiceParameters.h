@@ -22,6 +22,12 @@ struct VoiceParameters
     // sweep has to be to avoid zipper noise. Default is log2(87.31) = F2.
     std::atomic<float> pitchLog2Hz { 6.4483f };
     std::atomic<float> sawLevel { 0.70f };
+    std::atomic<float> pulseLevel { 0.00f };
+
+    // Duty cycle, 0..1. The oscillator clamps this against the current phase
+    // increment, so the usable range narrows toward 0.5 at high pitch.
+    std::atomic<float> pulseWidth { 0.50f };
+
     std::atomic<float> outputLevel { 0.25f };
 
     static_assert (std::atomic<float>::is_always_lock_free,

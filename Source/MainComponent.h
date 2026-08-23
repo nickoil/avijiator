@@ -11,7 +11,7 @@
 /*
     Top-level content component.
 
-    Item 2 step 2 (Saw): band-limited saw with Pitch, Saw and Level controls.
+    Item 2 step 3 (Pulse): band-limited saw + pulse/PWM.
     See documents/dsp-voice-design.md for the full build order.
 */
 class MainComponent final : public juce::AudioAppComponent
@@ -50,7 +50,7 @@ private:
 
     // Sizing the definition to this count makes the compiler enforce that the
     // table and the array stay in step.
-    static constexpr int numDebugControls = 3;
+    static constexpr int numDebugControls = 5;
     static const DebugControlSpec debugControlSpecs[numDebugControls];
 
     SynthVoice voice;

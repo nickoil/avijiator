@@ -19,6 +19,13 @@ void PolyBlepOscillator::setFrequency (float frequencyHz) noexcept
                                  (double) juce::jmax (minFrequencyHz, frequencyHz) * inverseSampleRate);
 }
 
+void PolyBlepOscillator::setPulseWidth (float newPulseWidth) noexcept
+{
+    // Only the caller's intent is stored here; the dt-dependent clamp has to
+    // happen in processSample, where the current increment is known.
+    pulseWidth = newPulseWidth;
+}
+
 float PolyBlepOscillator::polyBlep (float t, float dt) noexcept
 {
     if (t < dt)                             // the sample just after the edge
@@ -47,6 +54,28 @@ PolyBlepOscillator::Frame PolyBlepOscillator::processSample() noexcept
     // amplitude 2 at the wrap. Without the correction this is the aliased saw
     // that step 1 produced.
     frame.saw = 2.0f * t - 1.0f - polyBlep (t, dt);
+
+    // Each BLEP correction window is 2*dt wide, so if the two pulse edges get
+    // closer together than that, their windows overlap and the corrections
+    // corrupt each other. A static [0.02, 0.98] clamp is NOT enough at high
+    // pitch - the clamp has to tighten with dt. Capping phaseIncrement at
+    // fs/4 is what guarantees this lower limit never exceeds the upper one.
+    // The graceful degradation is that very high notes are forced toward a
+    // square, which is the right failure mode.
+    const auto w = juce::jlimit (juce::jmax (minPulseWidth,         2.0f * dt),
+                                 juce::jmin (maxPulseWidth, 1.0f - 2.0f * dt),
+                                 pulseWidth);
+
+    // A pulse has TWO discontinuities per cycle - a rising edge at 0 and a
+    // falling edge at w - and PWM moves the second one. Each correction must
+    // be evaluated in its own edge-relative phase.
+    auto fallingPhase = t - w;
+    if (fallingPhase < 0.0f)
+        fallingPhase += 1.0f;
+
+    frame.pulse = (t < w ? 1.0f : -1.0f)
+                + polyBlep (t, dt)                  // rising edge at 0
+                - polyBlep (fallingPhase, dt);      // falling edge at w
 
     // Phase advances once, after every tap has read it.
     phase += phaseIncrement;

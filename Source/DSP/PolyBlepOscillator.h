@@ -19,12 +19,14 @@ public:
     struct Frame
     {
         float saw = 0.0f;
+        float pulse = 0.0f;
     };
 
     void prepare (double newSampleRate) noexcept;
     void reset() noexcept;
 
     void setFrequency (float frequencyHz) noexcept;
+    void setPulseWidth (float newPulseWidth) noexcept;
 
     Frame processSample() noexcept;
 
@@ -39,10 +41,16 @@ private:
 
     // fs/4 rather than Nyquist: the sub-oscillator (step 4) runs at half this
     // increment, and each BLEP correction window needs dt of room either side
-    // of its edge.
+    // of its edge. It also guarantees the duty clamp in processSample can
+    // never invert - see the comment there.
     static constexpr double maxIncrement = 0.25;
+
+    static constexpr float minPulseWidth = 0.02f;
+    static constexpr float maxPulseWidth = 0.98f;
 
     double inverseSampleRate = 0.0;
     double phase = 0.0;
     double phaseIncrement = 0.0;
+
+    float pulseWidth = 0.5f;
 };
