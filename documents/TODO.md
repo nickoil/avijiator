@@ -44,7 +44,13 @@ Build/validate everything here before touching Android.
 - [ ] **5. Arpeggiator** — pattern modes (up/down/up-down/random/as-played),
       sample-accurate clock (not `Timer`-based), rate control
 - [ ] **6. UI pass** — knobs/controls for what's built so far, mouse-driven;
-      keep touch-first layout decisions in mind even though untested
+      keep touch-first layout decisions in mind even though untested. Consider
+      a Claude Design canvas mockup first to iterate on SH-101 panel layout
+      and touch-target sizing cheaply before hand-coding it in JUCE — it's a
+      visual reference only (HTML/CSS artboard), not JUCE code, so nothing
+      transfers directly; still hand-write every `Slider`/`LookAndFeel`
+      against it. Not useful before item 6 — the debug sliders used for
+      items 2-5 are explicit throwaway scaffolding
 - [ ] **7. Step sequencer (phase 2)** — 16-step (page-able) pattern, per-step
       pitch/gate/accent/slide, shared clock/trigger plumbing with the arp
 
