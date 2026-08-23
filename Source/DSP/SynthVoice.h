@@ -15,8 +15,12 @@
     (item 5) and step sequencer (item 7) front ends — see
     documents/dsp-voice-design.md section 6.
 
-    Step 6 (Resonance): the complete item 2 signal chain - four sources ->
-    mixer -> 24dB resonant lowpass -> VCA.
+    Item 2 (oscillator + filter core): four sources - saw, pulse/PWM, sub,
+    noise - each with an independent level, mixed and sent through a 24dB
+    resonant lowpass to the VCA. Built incrementally per
+    documents/dsp-voice-design.md section 7; the modulation summing points
+    below are item 3's (envelope + LFO) insertion points, not yet driven by
+    anything.
 */
 class SynthVoice
 {

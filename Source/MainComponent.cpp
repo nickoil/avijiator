@@ -3,9 +3,10 @@
 #include <cmath>
 
 //==============================================================================
-// Ordered top-to-bottom as they appear in the window. Later build steps insert
-// rows here (Pulse, Pulse width, Sub, Noise, Cutoff, Resonance) and bump
-// numDebugControls to match.
+// Ordered top-to-bottom as they appear in the window. All nine of item 2's
+// controls, landed incrementally across dsp-voice-design.md's build order.
+// Item 3 (envelope/LFO) will add rows the same way: extend this table, bump
+// numDebugControls, done.
 const MainComponent::DebugControlSpec MainComponent::debugControlSpecs[numDebugControls] =
 {
     { "Pitch",       20.0, 2000.0, 87.31, true,  &VoiceParameters::pitchLog2Hz },
@@ -74,9 +75,8 @@ void MainComponent::prepareToPlay (int /*samplesPerBlockExpected*/, double sampl
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
 {
-    // Denormals in filter integrator states (from step 5 onward) cost hundreds
-    // of cycles per sample once the voice decays toward silence - flush them
-    // to zero.
+    // Denormals in the filter's integrator states cost hundreds of cycles per
+    // sample once the voice decays toward silence - flush them to zero.
     const juce::ScopedNoDenormals noDenormals;
 
     auto* buffer = bufferToFill.buffer;
@@ -106,8 +106,8 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (16.0f);
-    g.drawFittedText ("Item 2 step 6 (Resonance): full voice. All sources to 0 + Resonance to max "
-                      "should self-oscillate.",
+    g.drawFittedText ("Item 2 complete: PolyBLEP saw/pulse + sub + noise -> 24dB resonant lowpass. "
+                      "A/B against SH-101 recordings.",
                        getLocalBounds().removeFromTop (60).reduced (20),
                        juce::Justification::centred,
                        2);

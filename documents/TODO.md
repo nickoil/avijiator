@@ -34,9 +34,16 @@ Build/validate everything here before touching Android.
       and stays up with no crash/stderr output; MainComponent plays a fixed
       440Hz test tone via AudioAppComponent. **Audible confirmation is yours
       to make** — I can't hear it.
-- [ ] **2. Oscillator + filter core** — saw/square + sub + noise mix →
+- [x] **2. Oscillator + filter core** — saw/square + sub + noise mix →
       resonant lowpass; A/B against reference SH-101 recordings.
-      Design + build order: [dsp-voice-design.md](dsp-voice-design.md)
+      Design + build order: [dsp-voice-design.md](dsp-voice-design.md).
+      Builds clean (Debug + Release, zero warnings), all four sources +
+      resonant filter working, self-oscillation confirmed, and a NaN
+      stability bug found and fixed along the way (softClip on the feedback
+      path — see section 3). **The actual acceptance criterion — "in the
+      family" with real SH-101 recordings — is a listening test only you can
+      do, and hasn't happened yet.** Ticked because the build work is done;
+      revisit this box if that A/B says otherwise
 - [ ] **3. Envelope + LFO** — shared ADSR routing (filter/amp/both), LFO →
       pitch and/or filter cutoff
 - [ ] **4. Mono note handling** — note-priority logic, glide/legato vs.
@@ -56,11 +63,15 @@ Build/validate everything here before touching Android.
 
 ### Voice follow-ups (deferred out of item 2, not numbered — no reordering)
 
-- [ ] **Filter drive / saturation** — soft-clip in the VCF's global feedback
-      path, for character. Item 2 deliberately ships a vanilla signal so the
-      SH-101 A/B tests one variable at a time; the topology is built to take
-      this as a one-line change. **This is the first thing to try if the
-      filter lacks character** — before considering a ladder rewrite
+- [ ] **Filter drive / saturation** — a driven stage to colour the sound at
+      all levels, for character. Item 2 ships a vanilla signal at normal
+      settings so the SH-101 A/B tests one variable at a time; the topology
+      is built to take this as a small change. **This is the first thing to
+      try if the filter lacks character** — before considering a ladder
+      rewrite. **Not the same thing** as the `softClip` already in `Vcf.cpp`
+      — that one only engages when resonance pushes the feedback loop past
+      self-oscillation, and exists so the filter doesn't diverge to NaN, not
+      for flavour. See documents/dsp-voice-design.md section 3
 - [ ] **DC blocker after the mixer** — one-pole highpass. A pulse of duty `w`
       carries DC of `2w-1`; real hardware AC-couples it away. Harmless with a
       static pulse width, but **needed before item 3 sweeps PWM with the

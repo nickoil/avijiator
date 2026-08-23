@@ -479,8 +479,8 @@ Each step has a one-word name — **"build Resonance"** is as good an instructio
 | 3 | **Pulse** | **Opus** | Pulse + PWM. Pulse + Pulse width sliders. | Verify the dynamic duty clamp degrades to square at high pitch rather than glitching |
 | 4 | **Mixer** | **Opus** | Sub (derived phase + flip-flop) + `NoiseGenerator`. Sub + Noise sliders. | Mixer complete. Verify the sub is one octave down with no drift |
 | 5 | **Filter** | **Opus** | `TptSvfStage.h` + `Vcf` with **resonance forced to 0**. Cutoff slider, cutoff mod point. | Plain 24dB lowpass — confirms the TPT math before the loop can mask a coefficient bug |
-| 6 | **Resonance** | **Opus** | ZDF global feedback solve, resonance mapping, compensation, −120 dBFS noise floor. Resonance slider. | **Self-oscillation test.** Highest-risk step, deliberately not merged into 5 |
-| 7 | **Polish** | Sonnet | `#if JUCE_DEBUG` NaN/range guard; comment pass; reconcile this document with anything that changed; tick TODO item 2. | Item 2 closed, nine sliders live |
+| 6 | **Resonance** | **Opus** | ZDF global feedback solve, resonance mapping, compensation, −120 dBFS noise floor. Resonance slider. | **Self-oscillation test.** Highest-risk step, deliberately not merged into 5. **Found a real bug**: full resonance diverged to NaN and killed the voice permanently — fixed with `softClip` on the feedback path, a stability requirement, not the flavour the drive/saturation TODO describes. See the callout in section 3 |
+| 7 | **Polish** | Sonnet | `#if JUCE_DEBUG` finiteness + magnitude guard (kept alongside a runtime recovery from step 6); comment pass across all DSP files and `MainComponent`; reconciled this document; tick TODO item 2. | Item 2 closed, nine sliders live |
 
 ### Before you `/clear`
 
@@ -519,13 +519,18 @@ Per [CLAUDE.md](../CLAUDE.md): *"Builds and runs" is a claim you can make. "Soun
 correct" is not.*
 
 **Objective, claimable:** builds clean in Debug and Release with no new warnings;
-launches and stays up; a `#if JUCE_DEBUG` per-block guard asserting
-`isfinite` and `|sample| < 32.0f` holds while every knob is swept to both extremes.
+launches and stays up; a `#if JUCE_DEBUG` per-block guard asserting `isfinite` and
+`|sample| < 32.0f` holds while every knob is swept to both extremes. `SynthVoice`
+also carries an always-on (not Debug-only) recovery: if a sample is ever non-finite,
+the block is cleared and the filter reset, rather than the voice staying silent
+until the app is restarted.
 
 **Objective but needs a human at the speakers:**
 - *Self-oscillation* — all four levels at 0, resonance max, sweep cutoff. Must produce
-  a clean sine tracking the cutoff. "Non-silent with all sources at zero" is a fact,
-  not a taste judgement.
+  a clean sine tracking the cutoff, and **must recover** when resonance is backed
+  off again — it does not, until step 6's `softClip` fix, found when full resonance
+  diverged to NaN and killed the voice permanently. "Non-silent with all sources at
+  zero, and comes back when resonance drops" is a fact, not a taste judgement.
 - *Sub lock* — saw + sub up, hold a minute. Any slow beating means the phase derivation
   is wrong.
 - *Aliasing* — saw only, cutoff open, sweep pitch slowly upward. Naive gives obvious

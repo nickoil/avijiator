@@ -13,13 +13,20 @@
 
     Resonance deliberately does NOT live in the per-stage damping. It is a
     single global feedback path around the whole cascade, solved zero-delay -
-    which gives an exactly derivable self-oscillation threshold and one
-    obvious place to add saturation later (see the drive/saturation TODO).
+    which gives an exactly derivable self-oscillation threshold.
 
     Evaluating the cascade at the cutoff (s = j) gives (j+1)^4 = -4, i.e.
     magnitude 1/4 at exactly 180 degrees - so negative feedback becomes
     POSITIVE at the cutoff, and unity loop gain (self-oscillation) lands at
     k = 4. That is the same reason a Moog ladder's resonance runs 0..4.
+
+    A linear filter does not self-oscillate at a steady amplitude above that
+    threshold - it diverges to inf/NaN, since nothing bounds the loop. softClip
+    on the feedback path (below) is what makes k > 4 usable at all: it is a
+    STABILITY requirement, found by ear when full resonance killed the voice
+    with no recovery, not the flavour a "drive stage" TODO describes. That TODO
+    is still open - a driven stage meant to colour the sound at all levels, not
+    just clamp a runaway loop.
 
     See documents/dsp-voice-design.md section 3.
 */

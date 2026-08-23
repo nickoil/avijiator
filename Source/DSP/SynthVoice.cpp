@@ -105,15 +105,41 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
     // This should never fire now that the filter's feedback path is bounded.
     // If it does, that is a real bug worth chasing, not something to live
     // with - hence the assert alongside the recovery.
+    auto blockIsFinite = true;
+
+   #if JUCE_DEBUG
+    // Debug-only sweep-testing aid, distinct from the recovery below: catches
+    // a "technically finite but absurdly loud" bug - e.g. a mixing error -
+    // that finiteness alone would not. Never alters the signal; it is purely
+    // an assert, so this does nothing in Release. Sweep every knob to both
+    // extremes with a Debug build and this either fires or it does not -
+    // that is an objective pass/fail, not a listening judgement.
+    static constexpr float maxPlausibleAmplitude = 32.0f;
+    auto peakAbsSample = 0.0f;
+   #endif
+
     for (int i = 0; i < numSamples; ++i)
     {
         if (! std::isfinite (output[i]))
         {
-            jassertfalse;
-
-            filter.reset();
-            std::fill (output, output + numSamples, 0.0f);
+            blockIsFinite = false;
             break;
         }
+
+       #if JUCE_DEBUG
+        peakAbsSample = juce::jmax (peakAbsSample, std::abs (output[i]));
+       #endif
+    }
+
+   #if JUCE_DEBUG
+    jassert (peakAbsSample < maxPlausibleAmplitude);
+   #endif
+
+    if (! blockIsFinite)
+    {
+        jassertfalse;
+
+        filter.reset();
+        std::fill (output, output + numSamples, 0.0f);
     }
 }

@@ -11,9 +11,10 @@
 /*
     Top-level content component.
 
-    Item 2 step 6 (Resonance): the complete item 2 voice - four sources ->
-    24dB resonant lowpass -> VCA, nine controls.
-    See documents/dsp-voice-design.md for the full build order.
+    Item 2 (oscillator + filter core) complete: four sources -> 24dB resonant
+    lowpass -> VCA, nine debug controls. This scaffolding is explicitly
+    throwaway - item 6 is the real UI pass and none of it survives that.
+    See documents/dsp-voice-design.md for how it was built.
 */
 class MainComponent final : public juce::AudioAppComponent
 {

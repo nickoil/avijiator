@@ -9,9 +9,9 @@
 
     Full PolyBLEP derivation in documents/dsp-voice-design.md section 2.
 
-    Step 4 (Mixer): all three taps present — saw, pulse/PWM, and the
-    sub-oscillator one octave down. Noise is a separate generator, not a tap
-    off this phase.
+    All three taps present: saw, pulse/PWM, and the sub-oscillator one octave
+    down. Noise is a separate generator (NoiseGenerator.h), not a tap off this
+    phase.
 */
 class PolyBlepOscillator
 {
