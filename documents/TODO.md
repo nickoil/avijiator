@@ -60,6 +60,17 @@ Build/validate everything here before touching Android.
       items 2-5 are explicit throwaway scaffolding
 - [ ] **7. Step sequencer (phase 2)** — 16-step (page-able) pattern, per-step
       pitch/gate/accent/slide, shared clock/trigger plumbing with the arp
+- [ ] **8. Character & "Vim"** — analogue realism + performance-feel layer on
+      top of the clean core voice: filter feedback saturation, exponential
+      envelope curves, oscillator drift, output noise floor/saturation,
+      humanised arp/seq timing, chorus, per-note randomisation, mod
+      wheel/aftertouch routing. An *addition* to the core voice, not a
+      prerequisite for it — depends on item 2 (voice), item 3 (envelope, for
+      A2's curves), and items 5/7 (arp/seq, for B2's humanisation) already
+      existing. Gated behind one global VIM switch plus per-feature controls,
+      so a clean/clinical mode stays reachable for A/B. Full spec, control
+      tiering, and priority order (highest-impact first):
+      [character-and-vim.md](character-and-vim.md)
 
 ### Voice follow-ups (deferred out of item 2, not numbered — no reordering)
 

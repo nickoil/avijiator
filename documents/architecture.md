@@ -60,6 +60,13 @@ coefficients, the resonance/self-oscillation derivation, parameter smoothing and
 the modulation insertion points — in
 [dsp-voice-design.md](dsp-voice-design.md).
 
+This core voice is deliberately **clean**: correct DSP, no analogue realism or
+performance-feel colouration layered on yet. That layer — filter feedback
+saturation, oscillator drift, humanised timing, output noise floor, chorus, and
+more, all gated behind one global switch so a clinical A/B reference stays
+reachable — is a separate later addition, not part of the core. Full spec in
+[character-and-vim.md](character-and-vim.md).
+
 ## Note input: arpeggiator vs. step sequencer
 
 Both considered; **decision: build the arpeggiator first**, add step sequencer later
@@ -158,6 +165,9 @@ Powered USB-C hub
 6. **UI pass**: knobs + controls for what's built so far (mouse-driven for
    now; touch-first layout decisions still apply, just not touch-tested yet)
 7. **Step sequencer** (phase 2): step grid, accent/slide, pattern storage
+8. **Character & "Vim"**: analogue realism + performance-feel layer on top of
+   the clean core voice — see [character-and-vim.md](character-and-vim.md)
+   for the full spec, control tiering, and priority order
 
 ### Stage B — Android (port)
 
