@@ -399,12 +399,13 @@ listened to between any two steps, and stopped at any of them.
 ### How to run a step
 
 ```
-Build step N from documents/dsp-voice-design.md
+Build Saw from documents/dsp-voice-design.md
 ```
 
 That is the whole instruction — this document carries everything a fresh session
-needs. At the end of each step I build it, confirm it compiles and launches, and
-stop for a listening test rather than continuing.
+needs. Step names and numbers are interchangeable ("build step 2" works too). At the
+end of each step I build it, confirm it compiles and launches, and stop for a
+listening test rather than continuing.
 
 **Sessions cluster by file — don't `/clear` between every step.** Steps 2–4 are all
 the same oscillator file and the same BLEP math; steps 5–6 are both the filter, and 6
@@ -413,10 +414,10 @@ immediately needed again, and costs a re-read of this document each time.
 
 | Session | Steps | Model | Shares |
 |---|---|---|---|
-| A | 1 | Sonnet | Plumbing — `SynthVoice` + `MainComponent` |
-| B | 2, 3, 4 | Opus | All `PolyBlepOscillator.cpp` |
-| C | 5, 6 | Opus | Both `Vcf.cpp` |
-| D | 7 | Sonnet | Polish, docs, tick the box |
+| A | **Plumbing** (1) | Sonnet | `SynthVoice` + `MainComponent` |
+| B | **Saw, Pulse, Mixer** (2–4) | Opus | All `PolyBlepOscillator.cpp` |
+| C | **Filter, Resonance** (5–6) | Opus | Both `Vcf.cpp` |
+| D | **Polish** (7) | Sonnet | Docs, guard, tick the box |
 
 `/model` switches model without clearing, so the Sonnet→Opus change is not a reason to
 start a new session.
@@ -430,16 +431,19 @@ debugging. When that happens mid-cluster, `/compact` is the better tool;
 earns it — steps 1 and 7 are plumbing and polish, so Sonnet saves the tighter Opus
 sub-limit for the steps where a wrong answer is silent.
 
-| # | Model | Work | Ends with |
-|---|---|---|---|
-| **0** | Sonnet | This document, the `architecture.md` link, and the two new TODO entries. **No code.** | Design captured before implementation |
-| 1 | Sonnet | `VoiceParameters.h` + `SynthVoice` skeleton (naive saw) + `MainComponent` rewiring: `ScopedNoDenormals`, mono render, channel fan-out, prepare/reset. **Plus `Vca.h`, the Level slider, and the amplitude mod summing point.** | Same audible result as item 1, new plumbing proven — and it can be turned down |
-| 2 | **Opus** | `PolyBlepOscillator`, **saw only**. Pitch + Saw sliders, their smoothers, pitch mod point. | Band-limited saw. **Run the aliasing sweep here**, before anything can mask it |
-| 3 | **Opus** | Pulse + PWM. Pulse + Pulse width sliders. | Verify the dynamic duty clamp degrades to square at high pitch rather than glitching |
-| 4 | **Opus** | Sub (derived phase + flip-flop) + `NoiseGenerator`. Sub + Noise sliders. | Mixer complete. Verify the sub is one octave down with no drift |
-| 5 | **Opus** | `TptSvfStage.h` + `Vcf` with **resonance forced to 0**. Cutoff slider, cutoff mod point. | Plain 24dB lowpass — confirms the TPT math before the loop can mask a coefficient bug |
-| 6 | **Opus** | ZDF global feedback solve, resonance mapping, compensation, −120 dBFS noise floor. Resonance slider. | **Self-oscillation test.** Highest-risk step, deliberately not merged into 5 |
-| 7 | Sonnet | `#if JUCE_DEBUG` NaN/range guard; comment pass; reconcile this document with anything that changed; tick TODO item 2. | Item 2 closed, nine sliders live |
+Each step has a one-word name — **"build Resonance"** is as good an instruction as
+"build step 6".
+
+| # | Name | Model | Work | Ends with |
+|---|---|---|---|---|
+| **0** | **Design** | Sonnet | This document, the `architecture.md` link, and the two new TODO entries. **No code.** | Design captured before implementation |
+| 1 | **Plumbing** | Sonnet | `VoiceParameters.h` + `SynthVoice` skeleton (naive saw) + `MainComponent` rewiring: `ScopedNoDenormals`, mono render, channel fan-out, prepare/reset. **Plus `Vca.h`, the Level slider, and the amplitude mod summing point.** | Same audible result as item 1, new plumbing proven — and it can be turned down |
+| 2 | **Saw** | **Opus** | `PolyBlepOscillator`, **saw only**. Pitch + Saw sliders, their smoothers, pitch mod point. | Band-limited saw. **Run the aliasing sweep here**, before anything can mask it |
+| 3 | **Pulse** | **Opus** | Pulse + PWM. Pulse + Pulse width sliders. | Verify the dynamic duty clamp degrades to square at high pitch rather than glitching |
+| 4 | **Mixer** | **Opus** | Sub (derived phase + flip-flop) + `NoiseGenerator`. Sub + Noise sliders. | Mixer complete. Verify the sub is one octave down with no drift |
+| 5 | **Filter** | **Opus** | `TptSvfStage.h` + `Vcf` with **resonance forced to 0**. Cutoff slider, cutoff mod point. | Plain 24dB lowpass — confirms the TPT math before the loop can mask a coefficient bug |
+| 6 | **Resonance** | **Opus** | ZDF global feedback solve, resonance mapping, compensation, −120 dBFS noise floor. Resonance slider. | **Self-oscillation test.** Highest-risk step, deliberately not merged into 5 |
+| 7 | **Polish** | Sonnet | `#if JUCE_DEBUG` NaN/range guard; comment pass; reconcile this document with anything that changed; tick TODO item 2. | Item 2 closed, nine sliders live |
 
 ### Before you `/clear`
 
