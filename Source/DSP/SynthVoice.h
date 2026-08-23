@@ -6,6 +6,7 @@
 #include "PolyBlepOscillator.h"
 #include "VoiceParameters.h"
 #include "Vca.h"
+#include "Vcf.h"
 
 //==============================================================================
 /*
@@ -14,8 +15,8 @@
     (item 5) and step sequencer (item 7) front ends — see
     documents/dsp-voice-design.md section 6.
 
-    Step 4 (Mixer): all four sources - saw, pulse/PWM, sub, noise - each with
-    an independent level, mixed and sent to the VCA. No filter yet (steps 5-6).
+    Step 5 (Filter): four sources -> mixer -> 24dB lowpass -> VCA. The filter
+    has no resonance yet; that is step 6.
 */
 class SynthVoice
 {
@@ -42,6 +43,7 @@ private:
     VoiceParameters parameters;
     PolyBlepOscillator oscillator;
     NoiseGenerator noise;
+    Vcf filter;
 
     // Linear smoothing on a log2(Hz) value IS multiplicative smoothing of the
     // frequency, which is the musically correct sweep - and it sidesteps
@@ -53,6 +55,7 @@ private:
     Smoothed pulseWidthSmoothed;
     Smoothed subLevelSmoothed;
     Smoothed noiseLevelSmoothed;
+    Smoothed cutoffLog2Smoothed;
     Smoothed outputLevelSmoothed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)

@@ -5,6 +5,7 @@
 void SynthVoice::prepare (double newSampleRate)
 {
     oscillator.prepare (newSampleRate);
+    filter.prepare (newSampleRate);
 
     pitchLog2Smoothed.reset (newSampleRate, rampSeconds);
     sawLevelSmoothed.reset (newSampleRate, rampSeconds);
@@ -12,6 +13,7 @@ void SynthVoice::prepare (double newSampleRate)
     pulseWidthSmoothed.reset (newSampleRate, rampSeconds);
     subLevelSmoothed.reset (newSampleRate, rampSeconds);
     noiseLevelSmoothed.reset (newSampleRate, rampSeconds);
+    cutoffLog2Smoothed.reset (newSampleRate, rampSeconds);
     outputLevelSmoothed.reset (newSampleRate, rampSeconds);
 
     snapshotParameters (true); // jump straight to target - block 1 shouldn't ramp up from zero
@@ -21,6 +23,7 @@ void SynthVoice::reset() noexcept
 {
     oscillator.reset();
     noise.reset();
+    filter.reset();
 }
 
 void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
@@ -39,6 +42,7 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
     apply (pulseWidthSmoothed,  parameters.pulseWidth  .load (std::memory_order_relaxed));
     apply (subLevelSmoothed,    parameters.subLevel    .load (std::memory_order_relaxed));
     apply (noiseLevelSmoothed,  parameters.noiseLevel  .load (std::memory_order_relaxed));
+    apply (cutoffLog2Smoothed,  parameters.cutoffLog2Hz.load (std::memory_order_relaxed));
     apply (outputLevelSmoothed, parameters.outputLevel .load (std::memory_order_relaxed));
 }
 
@@ -76,6 +80,16 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
                        + frame.sub           * subLevelSmoothed.getNextValue()
                        + noise.processSample() * noiseLevelSmoothed.getNextValue();
 
-        output[i] = Vca::processSample (mix, outputLevelSmoothed.getNextValue(), amplitudeModulation);
+        // Cutoff modulation summing point, in octaves - and unlike pitch,
+        // TWO sources land here at item 3: the shared ADSR (env amount) and
+        // the LFO. Octaves rather than Hz because a modulator that moves the
+        // cutoff by a fixed number of Hz sounds completely different at
+        // 200 Hz and at 5 kHz. The exp2 happens inside Vcf, after this sum.
+        const auto cutoffModulationOctaves = 0.0f;
+
+        const auto cutoffOctaves = cutoffLog2Smoothed.getNextValue() + cutoffModulationOctaves;
+        const auto filtered = filter.processSample (mix, cutoffOctaves);
+
+        output[i] = Vca::processSample (filtered, outputLevelSmoothed.getNextValue(), amplitudeModulation);
     }
 }

@@ -31,6 +31,11 @@ struct VoiceParameters
     std::atomic<float> subLevel { 0.00f };
     std::atomic<float> noiseLevel { 0.00f };
 
+    // Also log2(Hz), for the same reasons as pitch - and so envelope and LFO
+    // modulation can sum in octaves, which is the only way a modulator sounds
+    // the same at 200 Hz as at 5 kHz. Default is log2(2000).
+    std::atomic<float> cutoffLog2Hz { 10.9658f };
+
     std::atomic<float> outputLevel { 0.25f };
 
     static_assert (std::atomic<float>::is_always_lock_free,

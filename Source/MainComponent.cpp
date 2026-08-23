@@ -14,6 +14,7 @@ const MainComponent::DebugControlSpec MainComponent::debugControlSpecs[numDebugC
     { "Pulse width",  0.02,   0.98, 0.50, false, &VoiceParameters::pulseWidth  },
     { "Sub",          0.0,    1.0,  0.00, false, &VoiceParameters::subLevel    },
     { "Noise",        0.0,    1.0,  0.00, false, &VoiceParameters::noiseLevel  },
+    { "Cutoff",      20.0, 18000.0, 2000.0, true, &VoiceParameters::cutoffLog2Hz },
     { "Level",        0.0,    1.0,  0.25, false, &VoiceParameters::outputLevel },
 };
 
@@ -104,8 +105,8 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (16.0f);
-    g.drawFittedText ("Item 2 step 4 (Mixer): saw + pulse + sub + noise, four independent levels. "
-                      "No filter yet - that's next.",
+    g.drawFittedText ("Item 2 step 5 (Filter): 24dB lowpass. Resonance is deliberately absent - "
+                      "that's step 6.",
                        getLocalBounds().removeFromTop (60).reduced (20),
                        juce::Justification::centred,
                        2);
