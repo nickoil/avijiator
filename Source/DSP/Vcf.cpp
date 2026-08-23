@@ -22,6 +22,19 @@ void Vcf::reset() noexcept
     stage2.reset();
 }
 
+float Vcf::softClip (float x) noexcept
+{
+    // Identity inside the threshold, tanh-shaped outside it, and continuous
+    // at the join (tanh(0) = 0). Output is bounded to +/-(threshold + 1).
+    if (x > softClipThreshold)
+        return softClipThreshold + std::tanh (x - softClipThreshold);
+
+    if (x < -softClipThreshold)
+        return -softClipThreshold + std::tanh (x + softClipThreshold);
+
+    return x;
+}
+
 TptSvfCoefficients Vcf::makeCoefficients (float cutoffHz) const noexcept
 {
     // Prewarped integrator gain - maps the analogue cutoff onto the bilinear
@@ -36,12 +49,51 @@ TptSvfCoefficients Vcf::makeCoefficients (float cutoffHz) const noexcept
     return c;
 }
 
-float Vcf::processSample (float input, float cutoffLog2Hz) noexcept
+float Vcf::processSample (float input, float cutoffLog2Hz, float resonance01) noexcept
 {
     const auto cutoffHz = juce::jlimit (minCutoffHz, upperCutoffHz, std::exp2 (cutoffLog2Hz));
     const auto c = makeCoefficients (cutoffHz);
 
-    // Plain series cascade - no resonance yet. Step 6 replaces this line with
-    // the zero-delay solve of a global feedback loop around both stages.
-    return stage2.processLowpass (stage1.processLowpass (input, c), c);
+    const auto k = resonance01 * maxFeedback;
+
+    // Partial makeup for the passband level the feedback costs, plus the
+    // noise floor self-oscillation needs to start from.
+    const auto in = input * (1.0f + resonanceCompensation * k)
+                  + floorNoise.processSample() * noiseFloorAmplitude;
+
+    // Both stages share the same coefficients, so their instantaneous gain is
+    // identical and the cascade gain is simply that squared.
+    const auto stageGain = TptSvfStage::getInstantaneousGain (c);
+    const auto cascadeGain = stageGain * stageGain;
+    const auto cascadeState = stageGain * stage1.getStateContribution (c)
+                            + stage2.getStateContribution (c);
+
+    // Closing the loop u = x - k*y on an affine cascade y = Gt*u + St gives
+    //     y = (Gt*x + St) / (1 + k*Gt)
+    // solved algebraically rather than with a unit delay. No delay in the
+    // loop means no cutoff-dependent resonance detuning and no delay-induced
+    // blow-up. The denominator is >= 1 for k >= 0, so this never divides by
+    // zero - the filter can still genuinely self-oscillate, which is the
+    // intent, but it cannot blow up numerically.
+    const auto solved = (cascadeGain * in + cascadeState) / (1.0f + k * cascadeGain);
+
+    // Run the stages forward with the solved loop input, so the integrator
+    // states advance consistently with the value just computed. The soft clip
+    // is what stops the loop running away once k is past the self-oscillation
+    // threshold: it caps the energy entering the stages, so the oscillation
+    // settles into a bounded limit cycle instead of diverging to NaN.
+    //
+    // Below the clip threshold this is exactly `in - k * solved` and the
+    // forward pass reproduces `solved` to within rounding. Above it the two
+    // legitimately differ - which is the point - so there is no equality
+    // assert here.
+    const auto stageInput = softClip (in - k * solved);
+    const auto result = stage2.processLowpass (stage1.processLowpass (stageInput, c), c);
+
+    // Finiteness is the invariant that actually matters: a single non-finite
+    // sample latches the integrator states permanently, and the synth goes
+    // silent with no way back short of a restart.
+    jassert (std::isfinite (result));
+
+    return result;
 }

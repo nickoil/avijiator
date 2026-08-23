@@ -12,7 +12,15 @@
 class NoiseGenerator
 {
 public:
-    void reset() noexcept { state = defaultSeed; }
+    // Seed is settable so two generators in the same signal path (the audible
+    // noise source and the filter's self-oscillation floor) do not emit
+    // identical, correlated sequences.
+    explicit NoiseGenerator (std::uint32_t seed = defaultSeed) noexcept
+        : state (seed), initialSeed (seed)
+    {
+    }
+
+    void reset() noexcept { state = initialSeed; }
 
     float processSample() noexcept
     {
@@ -30,4 +38,5 @@ private:
     static constexpr std::uint32_t defaultSeed = 0x9e3779b9u; // any non-zero value
 
     std::uint32_t state = defaultSeed;
+    std::uint32_t initialSeed = defaultSeed;
 };

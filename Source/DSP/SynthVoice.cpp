@@ -1,5 +1,6 @@
 #include "SynthVoice.h"
 
+#include <algorithm>
 #include <cmath>
 
 void SynthVoice::prepare (double newSampleRate)
@@ -14,6 +15,7 @@ void SynthVoice::prepare (double newSampleRate)
     subLevelSmoothed.reset (newSampleRate, rampSeconds);
     noiseLevelSmoothed.reset (newSampleRate, rampSeconds);
     cutoffLog2Smoothed.reset (newSampleRate, rampSeconds);
+    resonanceSmoothed.reset (newSampleRate, resonanceRampSeconds);
     outputLevelSmoothed.reset (newSampleRate, rampSeconds);
 
     snapshotParameters (true); // jump straight to target - block 1 shouldn't ramp up from zero
@@ -43,6 +45,7 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
     apply (subLevelSmoothed,    parameters.subLevel    .load (std::memory_order_relaxed));
     apply (noiseLevelSmoothed,  parameters.noiseLevel  .load (std::memory_order_relaxed));
     apply (cutoffLog2Smoothed,  parameters.cutoffLog2Hz.load (std::memory_order_relaxed));
+    apply (resonanceSmoothed,   parameters.resonance   .load (std::memory_order_relaxed));
     apply (outputLevelSmoothed, parameters.outputLevel .load (std::memory_order_relaxed));
 }
 
@@ -88,8 +91,29 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         const auto cutoffModulationOctaves = 0.0f;
 
         const auto cutoffOctaves = cutoffLog2Smoothed.getNextValue() + cutoffModulationOctaves;
-        const auto filtered = filter.processSample (mix, cutoffOctaves);
+        const auto filtered = filter.processSample (mix, cutoffOctaves, resonanceSmoothed.getNextValue());
 
         output[i] = Vca::processSample (filtered, outputLevelSmoothed.getNextValue(), amplitudeModulation);
+    }
+
+    // Safety net. A single non-finite sample poisons the filter's integrator
+    // states permanently - every later sample is NaN, the synth goes silent,
+    // and no control can bring it back short of restarting the app. That is
+    // an unacceptable failure mode for something meant to be played live, so
+    // recover rather than merely assert: clear the block and reset the state.
+    //
+    // This should never fire now that the filter's feedback path is bounded.
+    // If it does, that is a real bug worth chasing, not something to live
+    // with - hence the assert alongside the recovery.
+    for (int i = 0; i < numSamples; ++i)
+    {
+        if (! std::isfinite (output[i]))
+        {
+            jassertfalse;
+
+            filter.reset();
+            std::fill (output, output + numSamples, 0.0f);
+            break;
+        }
     }
 }

@@ -30,6 +30,25 @@ public:
         ic2eq = 0.0f;
     }
 
+    //==============================================================================
+    // The lowpass output is AFFINE in its input:
+    //
+    //     v2 = ic2eq + a2*ic1eq + a3*(in - ic2eq)
+    //        = a3*in + [(1 - a3)*ic2eq + a2*ic1eq]
+    //        = G*in  + S
+    //
+    // Vcf uses these two halves to solve its resonance feedback loop
+    // algebraically, with no unit delay in the loop.
+    static float getInstantaneousGain (const TptSvfCoefficients& c) noexcept
+    {
+        return c.a3;
+    }
+
+    float getStateContribution (const TptSvfCoefficients& c) const noexcept
+    {
+        return (1.0f - c.a3) * ic2eq + c.a2 * ic1eq;
+    }
+
     float processLowpass (float input, const TptSvfCoefficients& c) noexcept
     {
         const auto v3 = input - ic2eq;

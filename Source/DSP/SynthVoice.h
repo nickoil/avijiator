@@ -15,8 +15,8 @@
     (item 5) and step sequencer (item 7) front ends — see
     documents/dsp-voice-design.md section 6.
 
-    Step 5 (Filter): four sources -> mixer -> 24dB lowpass -> VCA. The filter
-    has no resonance yet; that is step 6.
+    Step 6 (Resonance): the complete item 2 signal chain - four sources ->
+    mixer -> 24dB resonant lowpass -> VCA.
 */
 class SynthVoice
 {
@@ -40,6 +40,10 @@ private:
 
     static constexpr double rampSeconds = 0.02;
 
+    // A resonance jump moves the whole feedback loop at once and thumps, so
+    // it gets a deliberately slower ramp than everything else.
+    static constexpr double resonanceRampSeconds = 0.05;
+
     VoiceParameters parameters;
     PolyBlepOscillator oscillator;
     NoiseGenerator noise;
@@ -56,6 +60,7 @@ private:
     Smoothed subLevelSmoothed;
     Smoothed noiseLevelSmoothed;
     Smoothed cutoffLog2Smoothed;
+    Smoothed resonanceSmoothed;
     Smoothed outputLevelSmoothed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)

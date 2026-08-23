@@ -202,7 +202,25 @@ at the cutoff) occurs at:
 k_res = 4
 ```
 
-This is why the Moog ladder's resonance control famously runs 0–4. Mapping:
+This is why the Moog ladder's resonance control famously runs 0–4.
+
+> **A linear filter does not self-oscillate — it diverges.** `k_res = 4` is where
+> oscillation *starts*, but sustaining it at a steady amplitude requires a
+> nonlinearity. In a real ladder that is transistor saturation. In a purely linear
+> digital model the poles cross into the right half plane and the output grows
+> exponentially → `inf` → `NaN`, and NaN integrator states latch permanently: the
+> synth goes silent and no control recovers it.
+>
+> **Found by ear at step 6** — resonance to full killed the voice with no way back.
+> The fix is `softClip` on the feedback path in `Vcf` (below), which bounds the loop
+> so oscillation settles into a limit cycle. It is *exactly* linear below its
+> threshold, so the signal stays vanilla at normal levels.
+>
+> This is a **stability requirement, not flavour** — distinct from the voiced
+> drive/saturation TODO, which is a driven stage meant to colour the sound at all
+> levels. The original plan deferred saturation as cosmetic; that was wrong.
+
+Mapping:
 
 ```cpp
 static constexpr float maxFeedback = 4.5f;   // BY EAR — not derived
@@ -236,9 +254,27 @@ detuning and no delay-induced blowup. (The loop can still genuinely self-oscilla
 when `k` passes the physical threshold — that's the intent, not an artefact.)
 
 Then run the stages forward with the solved loop input so the integrator states
-advance consistently, and return stage 2's output — equal to the solved value within
-rounding — so states and output can't diverge. A `#if JUCE_DEBUG` assert comparing
-the two is a cheap check that the algebra and the state update haven't drifted apart.
+advance consistently, and return stage 2's output rather than `solved`.
+
+The loop input is soft-clipped — `softClip (in − k·solved)` — which is what bounds
+self-oscillation (see the box above):
+
+```cpp
+if (x >  threshold) return  threshold + tanh (x - threshold);
+if (x < -threshold) return -threshold + tanh (x + threshold);
+return x;                                   // exactly linear inside
+```
+
+Below the threshold the forward pass reproduces `solved` to within rounding; above
+it the two legitimately differ, which is the whole point — so there is no
+solved-vs-result equality assert. The invariant that actually matters is
+**finiteness**, since one non-finite sample latches the states forever.
+
+`SynthVoice::renderNextBlock` also carries a per-block non-finite scan that resets
+the filter and clears the block if it ever trips. That should be unreachable now the
+loop is bounded, but "silent until the app is restarted" is an unacceptable failure
+mode for an instrument intended to be played live, so it recovers rather than merely
+asserting.
 
 ### Resonance level compensation
 
@@ -471,6 +507,7 @@ These are starting values. All of them are listening decisions:
 |---|---|---|
 | `maxFeedback` | `4.5f` | Where on the resonance knob self-oscillation kicks in |
 | `resonanceCompensation` | `0.5f` | How much bass loss remains at high resonance |
+| `softClipThreshold` | `1.0f` | Self-oscillation amplitude, and how hard the filter clips when driven. Lower = earlier, more compressed oscillation |
 | Smoothing ramps | 20 ms / 50 ms | Laggy vs. still-zippering |
 | `minPulseWidth` / `maxPulseWidth` | `0.02` / `0.98` | PWM travel at the extremes |
 

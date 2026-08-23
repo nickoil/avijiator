@@ -36,6 +36,10 @@ struct VoiceParameters
     // the same at 200 Hz as at 5 kHz. Default is log2(2000).
     std::atomic<float> cutoffLog2Hz { 10.9658f };
 
+    // 0..1, mapped onto the filter's feedback gain. Self-oscillates near the
+    // top of the range.
+    std::atomic<float> resonance { 0.20f };
+
     std::atomic<float> outputLevel { 0.25f };
 
     static_assert (std::atomic<float>::is_always_lock_free,

@@ -15,6 +15,7 @@ const MainComponent::DebugControlSpec MainComponent::debugControlSpecs[numDebugC
     { "Sub",          0.0,    1.0,  0.00, false, &VoiceParameters::subLevel    },
     { "Noise",        0.0,    1.0,  0.00, false, &VoiceParameters::noiseLevel  },
     { "Cutoff",      20.0, 18000.0, 2000.0, true, &VoiceParameters::cutoffLog2Hz },
+    { "Resonance",    0.0,    1.0,  0.20, false, &VoiceParameters::resonance   },
     { "Level",        0.0,    1.0,  0.25, false, &VoiceParameters::outputLevel },
 };
 
@@ -105,8 +106,8 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (16.0f);
-    g.drawFittedText ("Item 2 step 5 (Filter): 24dB lowpass. Resonance is deliberately absent - "
-                      "that's step 6.",
+    g.drawFittedText ("Item 2 step 6 (Resonance): full voice. All sources to 0 + Resonance to max "
+                      "should self-oscillate.",
                        getLocalBounds().removeFromTop (60).reduced (20),
                        juce::Justification::centred,
                        2);

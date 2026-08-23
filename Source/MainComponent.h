@@ -11,7 +11,8 @@
 /*
     Top-level content component.
 
-    Item 2 step 5 (Filter): four sources -> 24dB lowpass, no resonance yet.
+    Item 2 step 6 (Resonance): the complete item 2 voice - four sources ->
+    24dB resonant lowpass -> VCA, nine controls.
     See documents/dsp-voice-design.md for the full build order.
 */
 class MainComponent final : public juce::AudioAppComponent
@@ -50,7 +51,7 @@ private:
 
     // Sizing the definition to this count makes the compiler enforce that the
     // table and the array stay in step.
-    static constexpr int numDebugControls = 8;
+    static constexpr int numDebugControls = 9;
     static const DebugControlSpec debugControlSpecs[numDebugControls];
 
     SynthVoice voice;
