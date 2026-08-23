@@ -28,6 +28,9 @@ struct VoiceParameters
     // increment, so the usable range narrows toward 0.5 at high pitch.
     std::atomic<float> pulseWidth { 0.50f };
 
+    std::atomic<float> subLevel { 0.00f };
+    std::atomic<float> noiseLevel { 0.00f };
+
     std::atomic<float> outputLevel { 0.25f };
 
     static_assert (std::atomic<float>::is_always_lock_free,

@@ -11,6 +11,7 @@ void PolyBlepOscillator::prepare (double newSampleRate) noexcept
 void PolyBlepOscillator::reset() noexcept
 {
     phase = 0.0;
+    subHigh = false;
 }
 
 void PolyBlepOscillator::setFrequency (float frequencyHz) noexcept
@@ -77,10 +78,33 @@ PolyBlepOscillator::Frame PolyBlepOscillator::processSample() noexcept
                 + polyBlep (t, dt)                  // rising edge at 0
                 - polyBlep (fallingPhase, dt);      // falling edge at w
 
+    // Sub-oscillator: a square one octave down, derived arithmetically from
+    // the main phase plus the flip-flop bit - NOT run on its own accumulator.
+    // A second accumulator incremented by dt*0.5 would accumulate rounding
+    // error independently of the main one and slowly slip phase against the
+    // saw, audible as slow beating over tens of seconds. Deriving it makes it
+    // phase-locked by construction, exactly like the SH-101's flip-flop
+    // divider hanging off the VCO.
+    const auto subPhase = 0.5f * t + (subHigh ? 0.5f : 0.0f);
+    const auto subDt = 0.5f * dt;
+
+    auto subFallingPhase = subPhase + 0.5f;
+    if (subFallingPhase >= 1.0f)
+        subFallingPhase -= 1.0f;
+
+    // Always 50% duty, so unlike the pulse it needs no width clamp and
+    // carries no DC.
+    frame.sub = (subPhase < 0.5f ? 1.0f : -1.0f)
+              + polyBlep (subPhase,        subDt)
+              - polyBlep (subFallingPhase, subDt);
+
     // Phase advances once, after every tap has read it.
     phase += phaseIncrement;
     if (phase >= 1.0)
+    {
         phase -= 1.0;
+        subHigh = ! subHigh; // divide by two
+    }
 
     return frame;
 }

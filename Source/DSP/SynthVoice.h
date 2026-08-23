@@ -2,6 +2,7 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include "NoiseGenerator.h"
 #include "PolyBlepOscillator.h"
 #include "VoiceParameters.h"
 #include "Vca.h"
@@ -13,8 +14,8 @@
     (item 5) and step sequencer (item 7) front ends — see
     documents/dsp-voice-design.md section 6.
 
-    Step 3 (Pulse): band-limited saw + pulse/PWM -> VCA. No sub or noise yet
-    (step 4), no filter yet (steps 5-6).
+    Step 4 (Mixer): all four sources - saw, pulse/PWM, sub, noise - each with
+    an independent level, mixed and sent to the VCA. No filter yet (steps 5-6).
 */
 class SynthVoice
 {
@@ -40,6 +41,7 @@ private:
 
     VoiceParameters parameters;
     PolyBlepOscillator oscillator;
+    NoiseGenerator noise;
 
     // Linear smoothing on a log2(Hz) value IS multiplicative smoothing of the
     // frequency, which is the musically correct sweep - and it sidesteps
@@ -49,6 +51,8 @@ private:
     Smoothed sawLevelSmoothed;
     Smoothed pulseLevelSmoothed;
     Smoothed pulseWidthSmoothed;
+    Smoothed subLevelSmoothed;
+    Smoothed noiseLevelSmoothed;
     Smoothed outputLevelSmoothed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)

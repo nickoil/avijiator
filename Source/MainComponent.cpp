@@ -12,6 +12,8 @@ const MainComponent::DebugControlSpec MainComponent::debugControlSpecs[numDebugC
     { "Saw",          0.0,    1.0,  0.70, false, &VoiceParameters::sawLevel    },
     { "Pulse",        0.0,    1.0,  0.00, false, &VoiceParameters::pulseLevel  },
     { "Pulse width",  0.02,   0.98, 0.50, false, &VoiceParameters::pulseWidth  },
+    { "Sub",          0.0,    1.0,  0.00, false, &VoiceParameters::subLevel    },
+    { "Noise",        0.0,    1.0,  0.00, false, &VoiceParameters::noiseLevel  },
     { "Level",        0.0,    1.0,  0.25, false, &VoiceParameters::outputLevel },
 };
 
@@ -102,8 +104,8 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (16.0f);
-    g.drawFittedText ("Item 2 step 3 (Pulse): saw + pulse with PWM. Turn Saw down and Pulse up, "
-                      "then sweep Pulse width.",
+    g.drawFittedText ("Item 2 step 4 (Mixer): saw + pulse + sub + noise, four independent levels. "
+                      "No filter yet - that's next.",
                        getLocalBounds().removeFromTop (60).reduced (20),
                        juce::Justification::centred,
                        2);

@@ -9,9 +9,9 @@
 
     Full PolyBLEP derivation in documents/dsp-voice-design.md section 2.
 
-    Step 2 (Saw): the saw tap only. Pulse + PWM join at step 3 and the sub at
-    step 4 — Frame gains fields and processSample gains lines, but the phase
-    accumulator does not change.
+    Step 4 (Mixer): all three taps present — saw, pulse/PWM, and the
+    sub-oscillator one octave down. Noise is a separate generator, not a tap
+    off this phase.
 */
 class PolyBlepOscillator
 {
@@ -20,6 +20,7 @@ public:
     {
         float saw = 0.0f;
         float pulse = 0.0f;
+        float sub = 0.0f;
     };
 
     void prepare (double newSampleRate) noexcept;
@@ -53,4 +54,9 @@ private:
     double phaseIncrement = 0.0;
 
     float pulseWidth = 0.5f;
+
+    // Divide-by-two flip-flop for the sub-oscillator, toggled on each main
+    // phase wrap. The sub's phase is derived from this plus the main phase,
+    // never accumulated separately - see processSample.
+    bool subHigh = false;
 };

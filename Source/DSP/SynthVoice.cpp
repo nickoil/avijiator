@@ -10,6 +10,8 @@ void SynthVoice::prepare (double newSampleRate)
     sawLevelSmoothed.reset (newSampleRate, rampSeconds);
     pulseLevelSmoothed.reset (newSampleRate, rampSeconds);
     pulseWidthSmoothed.reset (newSampleRate, rampSeconds);
+    subLevelSmoothed.reset (newSampleRate, rampSeconds);
+    noiseLevelSmoothed.reset (newSampleRate, rampSeconds);
     outputLevelSmoothed.reset (newSampleRate, rampSeconds);
 
     snapshotParameters (true); // jump straight to target - block 1 shouldn't ramp up from zero
@@ -18,6 +20,7 @@ void SynthVoice::prepare (double newSampleRate)
 void SynthVoice::reset() noexcept
 {
     oscillator.reset();
+    noise.reset();
 }
 
 void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
@@ -34,6 +37,8 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
     apply (sawLevelSmoothed,    parameters.sawLevel    .load (std::memory_order_relaxed));
     apply (pulseLevelSmoothed,  parameters.pulseLevel  .load (std::memory_order_relaxed));
     apply (pulseWidthSmoothed,  parameters.pulseWidth  .load (std::memory_order_relaxed));
+    apply (subLevelSmoothed,    parameters.subLevel    .load (std::memory_order_relaxed));
+    apply (noiseLevelSmoothed,  parameters.noiseLevel  .load (std::memory_order_relaxed));
     apply (outputLevelSmoothed, parameters.outputLevel .load (std::memory_order_relaxed));
 }
 
@@ -63,10 +68,13 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
 
         const auto frame = oscillator.processSample();
 
-        // Source mixer - independent level per source, per the SH-101's four
-        // mixer sliders. Sub and noise join at step 4.
-        const auto mix = frame.saw   * sawLevelSmoothed.getNextValue()
-                       + frame.pulse * pulseLevelSmoothed.getNextValue();
+        // Source mixer - an independent level per source, matching the
+        // SH-101's four mixer sliders. Noise is the one source that is not a
+        // tap off the oscillator phase.
+        const auto mix = frame.saw           * sawLevelSmoothed.getNextValue()
+                       + frame.pulse         * pulseLevelSmoothed.getNextValue()
+                       + frame.sub           * subLevelSmoothed.getNextValue()
+                       + noise.processSample() * noiseLevelSmoothed.getNextValue();
 
         output[i] = Vca::processSample (mix, outputLevelSmoothed.getNextValue(), amplitudeModulation);
     }
