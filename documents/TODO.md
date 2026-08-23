@@ -59,7 +59,13 @@ Build/validate everything here before touching Android.
       against it. Not useful before item 6 — the debug sliders used for
       items 2-5 are explicit throwaway scaffolding
 - [ ] **7. Step sequencer (phase 2)** — 16-step (page-able) pattern, per-step
-      pitch/gate/accent/slide, shared clock/trigger plumbing with the arp
+      pitch/gate/accent/slide, shared clock/trigger plumbing with the arp.
+      **Future consideration, not yet scoped into this item**: per-step
+      parameter automation ("p-locks") beyond pitch/gate/accent/slide —
+      full design in [step-automation.md](step-automation.md). That doc
+      flags itself as plausibly a bigger build than the synth voice, so
+      treat it as something to look at when item 7 is underway, not a
+      commitment yet
 - [ ] **8. Character & "Vim"** — analogue realism + performance-feel layer on
       top of the clean core voice: filter feedback saturation, exponential
       envelope curves, oscillator drift, output noise floor/saturation,
