@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-x64",
+      "displayName": "Windows x64 (MSVC, 64-bit host)",
+      "description": "toolset host=x64 is load-bearing: the 32-bit hosted cl.exe runs out of heap space compiling JUCE's larger translation units in parallel (error C1060). -A x64 alone only sets the TARGET architecture, not the compiler's own.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "toolset": "host=x64",
+      "binaryDir": "${sourceDir}/build"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "configurePreset": "windows-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "configurePreset": "windows-x64",
+      "configuration": "Release"
+    }
+  ]
+}

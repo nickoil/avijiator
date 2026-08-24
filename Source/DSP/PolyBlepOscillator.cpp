@@ -52,8 +52,8 @@ PolyBlepOscillator::Frame PolyBlepOscillator::processSample() noexcept
     Frame frame;
 
     // Naive rising ramp, minus the correction for the single downward step of
-    // amplitude 2 at the wrap. Without the correction this is the aliased saw
-    // that step 1 produced.
+    // amplitude 2 at the wrap. Without that correction this is a plain
+    // aliasing saw - the correction is the entire point.
     frame.saw = 2.0f * t - 1.0f - polyBlep (t, dt);
 
     // Each BLEP correction window is 2*dt wide, so if the two pulse edges get

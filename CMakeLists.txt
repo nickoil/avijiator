@@ -31,11 +31,14 @@ target_sources(Avijiator
     PRIVATE
         Source/Main.cpp
         Source/MainComponent.cpp
+        Source/NoteRouter.cpp
+        Source/QwertyNoteInput.cpp
         Source/DSP/PolyBlepOscillator.cpp
         Source/DSP/SynthVoice.cpp
         Source/DSP/Vcf.cpp
         Source/DSP/Adsr.cpp
-        Source/DSP/Lfo.cpp)
+        Source/DSP/Lfo.cpp
+        Source/DSP/NoteStack.cpp)
 
 # Quoted includes already resolve relative to the including file, so this is
 # convenience, not a requirement. Keep writing includes in relative form
@@ -47,6 +50,21 @@ target_compile_definitions(Avijiator
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
+
+        # ASIO gives far lower latency than WASAPI shared mode, which is what
+        # JUCE otherwise defaults to on Windows. JUCE 9 bundles the three
+        # Steinberg interface headers it needs (modules/juce_audio_devices/
+        # native/asio), so no SDK download is required - older JUCE versions
+        # did need one.
+        #
+        # LICENCE NOTE: those headers are dual-licensed, proprietary Steinberg
+        # ASIO Licence OR GPLv3. Fine either way for private use. Distributing
+        # a build means either accepting GPLv3 for the whole app, or obtaining
+        # a signed agreement from Steinberg. See that folder's LICENSE.txt.
+        #
+        # Windows-only: Stage B's Android target uses AAudio and must not see
+        # this.
+        $<$<PLATFORM_ID:Windows>:JUCE_ASIO=1>
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Avijiator,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Avijiator,JUCE_VERSION>")
 

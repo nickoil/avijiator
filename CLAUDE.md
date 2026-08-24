@@ -39,12 +39,22 @@ context costs allowance on every message, not just the one that created it.
 <!-- Fill in after TODO item 0 is done, then keep current. Cheaper to read one
      correct command here than to rediscover it every session. -->
 
-- Configure: _TBD_
-- Build: _TBD_
-- Run: _TBD_
+CMake lives inside the Build Tools install, not on `PATH`:
+`"C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"`
+
+- Configure: `cmake --preset windows-x64`
+- Build: `cmake --build --preset debug` (or `release`)
+- Run: `./build/Avijiator_artefacts/Debug/Avijiator.exe`
+- **Always use the presets.** `CMakePresets.json` sets `toolset host=x64`, and
+  that is load-bearing: the 32-bit hosted `cl.exe` runs out of heap space
+  compiling JUCE in parallel (`error C1060`). `-A x64` alone does *not* fix
+  it — that sets the target architecture, not the compiler's own.
 - Toolchain: VS Code + CMake Tools, MSVC Build Tools (no Visual Studio IDE, no
   Projucer during Stage A). Static MSVC runtime (`/MT`) via
   `MSVC_RUNTIME_LIBRARY` — single-exe distribution, no redistributable.
+- `JUCE_ASIO=1` is set (Windows only) for low-latency audio. JUCE 9 bundles
+  the Steinberg headers, so no SDK download — but they are GPLv3-or-signed-
+  agreement, which matters only if a build is ever distributed.
 
 ## Hard constraints
 

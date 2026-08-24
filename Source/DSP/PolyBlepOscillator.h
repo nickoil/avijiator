@@ -34,13 +34,13 @@ public:
 private:
     //==============================================================================
     // Band-limited step residual, scaled for a discontinuity of amplitude 2 —
-    // which is exactly the saw's wrap (+1 -> -1), and also the pulse's edges
-    // when they arrive at step 3, so it is used unscaled for both.
+    // which is exactly the saw's wrap (+1 -> -1) and also the pulse's edges,
+    // so it is used unscaled for both.
     static float polyBlep (float t, float dt) noexcept;
 
     static constexpr float minFrequencyHz = 8.0f;
 
-    // fs/4 rather than Nyquist: the sub-oscillator (step 4) runs at half this
+    // fs/4 rather than Nyquist: the sub-oscillator runs at half this
     // increment, and each BLEP correction window needs dt of room either side
     // of its edge. It also guarantees the duty clamp in processSample can
     // never invert - see the comment there.

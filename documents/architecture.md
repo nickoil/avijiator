@@ -19,6 +19,40 @@ first as a **Windows standalone app** for fast iteration, then ported to Android
   requires re-signing every 7 days, which doesn't fit a "build once, gig with it"
   workflow. Revisit only if a Mac + $79/yr Developer account becomes available.
 
+## Licensing — only matters if this is ever distributed
+
+**Current status: personal use, not distributed — so none of the below applies
+yet.** Building it and playing it live triggers no licensing obligation at all.
+Recorded here because it is painful to reconstruct later, and because it
+constrains what "release it" would mean.
+
+Two dual-licensed dependencies:
+
+| Dependency | Option A (free) | Option B (paid / by agreement) |
+|---|---|---|
+| **JUCE 9** | AGPLv3 | Commercial JUCE licence |
+| **Steinberg ASIO** headers (bundled in JUCE 9, enabled via `JUCE_ASIO=1`) | GPLv3 | Proprietary Steinberg licence — needs an agreement **signed by Steinberg before publishing** |
+
+The practical consequence is that **JUCE, not ASIO, is the binding constraint**:
+
+- **Distribute as free/open source** → AGPLv3 for JUCE, GPLv3 for ASIO. Nothing
+  to ask anyone. Enabling ASIO added *no* obligation that AGPLv3 didn't already
+  impose. The whole app's source must be published.
+- **Distribute closed-source** → requires a paid JUCE licence **and** a signed
+  Steinberg agreement. The JUCE licence is the larger hurdle; ASIO is not what
+  would be blocking.
+
+AGPLv3 is GPLv3 plus a network-use clause, so a GPLv3 component composes into it
+without conflict.
+
+One obligation genuinely *new* with ASIO, and separate from the code licence:
+Steinberg's **ASIO trademark/logo guidelines** govern using the ASIO name or logo
+in a UI or in marketing material.
+
+Not legal advice — if money ever changes hands, this is worth checking properly.
+Licence texts: `libs/JUCE/LICENSE.md` and
+`libs/JUCE/modules/juce_audio_devices/native/asio/LICENSE.txt`.
+
 ## Signal chain
 
 ```
@@ -43,6 +77,10 @@ Modulation:
 The envelope and LFO are specified in detail — ADSR state machine, the gate
 edge-detection pattern, LFO waveform math, routing, and parameter smoothing — in
 [envelope-lfo-design.md](envelope-lfo-design.md).
+
+Note input and mono-voice behaviour — the lock-free event FIFO, note-priority
+resolution, glide, and legato/retrigger — are specified in
+[note-handling-design.md](note-handling-design.md).
 
 ## Voice architecture (core, shared across both note-input modes)
 

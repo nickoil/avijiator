@@ -9,8 +9,8 @@ void SynthVoice::prepare (double newSampleRate)
     filter.prepare (newSampleRate);
     envelope.prepare (newSampleRate);
     lfo.prepare (newSampleRate);
+    glide.prepare (newSampleRate);
 
-    pitchLog2Smoothed.reset (newSampleRate, rampSeconds);
     sawLevelSmoothed.reset (newSampleRate, rampSeconds);
     pulseLevelSmoothed.reset (newSampleRate, rampSeconds);
     pulseWidthSmoothed.reset (newSampleRate, rampSeconds);
@@ -34,7 +34,58 @@ void SynthVoice::reset() noexcept
     filter.reset();
     envelope.reset();
     lfo.reset();
-    lastGateState = false;
+
+    // Middle C, purely as a defined starting point - the first note-on snaps
+    // away from it before anything is audible, since a fresh trigger never
+    // glides.
+    glide.reset (defaultPitchLog2Hz);
+
+    voiceGated = false;
+    currentVelocity = 0.0f;
+}
+
+//==============================================================================
+void SynthVoice::noteOn (float pitchLog2Hz, float velocity) noexcept
+{
+    currentVelocity = velocity;
+
+    if (! voiceGated)
+    {
+        // Fresh trigger from silence. Always restarts the envelope, and the
+        // pitch SNAPS rather than sliding - a phrase's opening note should
+        // not glide in from whatever pitch the ramp was left at, possibly
+        // minutes ago.
+        glide.setTarget (pitchLog2Hz);
+        glide.snapToTarget();
+        envelope.noteOn();
+    }
+    else
+    {
+        // Overlapping note-on. Pitch always ramps here - that is what makes a
+        // glide audible at all - and the mode decides the envelope.
+        glide.setTarget (pitchLog2Hz);
+
+        const auto mode = (LegatoRetriggerMode) parameters.legatoRetriggerMode.load (std::memory_order_relaxed);
+
+        if (mode == LegatoRetriggerMode::Retrigger)
+            envelope.noteOn();
+    }
+
+    voiceGated = true;
+}
+
+void SynthVoice::retargetPitch (float pitchLog2Hz) noexcept
+{
+    // A key came up and revealed another still held. Never a retrigger, in
+    // EITHER mode, because nothing was newly pressed - which is precisely why
+    // this is a separate method rather than a flag on noteOn().
+    glide.setTarget (pitchLog2Hz);
+}
+
+void SynthVoice::noteOff() noexcept
+{
+    envelope.noteOff();
+    voiceGated = false;
 }
 
 void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
@@ -47,7 +98,6 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
             smoother.setTargetValue (value);
     };
 
-    apply (pitchLog2Smoothed,   parameters.pitchLog2Hz .load (std::memory_order_relaxed));
     apply (sawLevelSmoothed,    parameters.sawLevel    .load (std::memory_order_relaxed));
     apply (pulseLevelSmoothed,  parameters.pulseLevel  .load (std::memory_order_relaxed));
     apply (pulseWidthSmoothed,  parameters.pulseWidth  .load (std::memory_order_relaxed));
@@ -70,16 +120,10 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
     // every block boundary.
     snapshotParameters (false);
 
-    // Gate edge detection, on the audio thread, from an atomic the message
-    // thread only ever writes to - never call into stateful envelope methods
-    // directly from a button callback, that would be an unsynchronized write
-    // into audio-thread state. See documents/envelope-lfo-design.md section 2.
-    const auto gateNow = parameters.gate.load (std::memory_order_relaxed);
-    if (gateNow != lastGateState)
-    {
-        if (gateNow) envelope.noteOn(); else envelope.noteOff();
-        lastGateState = gateNow;
-    }
+    // Note events are NOT handled here any more - NoteRouter drains its FIFOs
+    // and calls noteOn/retargetPitch/noteOff before this runs, so by the time
+    // we get here the envelope and glide target are already set for this
+    // block. See documents/note-handling-design.md section 7.
 
     // Envelope times are read once per block, not smoothed - see
     // documents/envelope-lfo-design.md section 5: changing one only affects
@@ -102,6 +146,11 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
     // documents/envelope-lfo-design.md section 5.
     lfo.setWaveform ((Lfo::Waveform) parameters.lfoWaveform.load (std::memory_order_relaxed));
     lfo.setRate (parameters.lfoRateHz.load (std::memory_order_relaxed));
+
+    // Also a time constant, read raw once per block - a change here alters
+    // only the rate of an in-progress ramp, never its current position, so
+    // there is nothing to smooth.
+    glide.setGlideTimeSeconds (parameters.glideTimeSeconds.load (std::memory_order_relaxed));
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -128,7 +177,7 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         // musically at any pitch.
         const auto pitchModulationOctaves = lfoValue * lfoToPitchDepthSmoothed.getNextValue();
 
-        const auto pitchOctaves = pitchLog2Smoothed.getNextValue() + pitchModulationOctaves;
+        const auto pitchOctaves = glide.processSample() + pitchModulationOctaves;
         oscillator.setFrequency (std::exp2 (pitchOctaves));
         oscillator.setPulseWidth (pulseWidthSmoothed.getNextValue());
 

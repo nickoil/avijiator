@@ -3,6 +3,18 @@
 #include <atomic>
 
 #include "Lfo.h"
+#include "NoteStack.h"
+
+//==============================================================================
+/*
+    Whether an overlapping note-on restarts the envelope.
+
+    Governs note-ON only. A note-off that reveals another still-held note
+    underneath is NEVER a retrigger in either mode - nothing was newly
+    pressed - which is why SynthVoice has a separate retargetPitch() method.
+    See documents/note-handling-design.md section 5.
+*/
+enum class LegatoRetriggerMode : int { Retrigger = 0, Legato = 1 };
 
 //==============================================================================
 /*
@@ -29,11 +41,10 @@ enum class EnvelopeDestination : int { Filter = 0, Amp = 1, Both = 2 };
 */
 struct VoiceParameters
 {
-    // Pitch is stored as log2(Hz), not Hz. Two payoffs: modulation sums
-    // linearly in octaves, and linear smoothing of a log2 value is
-    // multiplicative smoothing of the frequency - which is what a frequency
-    // sweep has to be to avoid zipper noise. Default is log2(87.31) = F2.
-    std::atomic<float> pitchLog2Hz { 6.4483f };
+    // NOTE: there is no pitch parameter here any more. Pitch now arrives as
+    // note events through NoteRouter's FIFOs and is owned by SynthVoice's
+    // Glide, not set from the UI - see documents/note-handling-design.md
+    // section 6.
     std::atomic<float> sawLevel { 0.70f };
     std::atomic<float> pulseLevel { 0.00f };
 
@@ -55,12 +66,11 @@ struct VoiceParameters
 
     std::atomic<float> outputLevel { 0.25f };
 
-    // Item 3 (envelope + LFO). No real note input yet (that's item 4) - this
-    // is a temporary manual gate for testing, written from the message thread
-    // by a debug button. SynthVoice edge-detects it on the audio thread
-    // rather than acting on it directly here - see
-    // documents/envelope-lfo-design.md section 2.
-    std::atomic<bool> gate { false };
+    // NOTE: item 3's `gate` atomic is gone. Keeping it alongside real note
+    // input would mean two independently edge-detected triggers of the same
+    // envelope with no defined precedence - the exact race the note FIFO
+    // exists to eliminate. Its removal is a correctness requirement, not
+    // tidying - see documents/note-handling-design.md section 6.
 
     // Envelope times: NOT smoothed by SynthVoice (see envelope-lfo-design.md
     // section 5) - changing one only affects the rate of future samples, not
@@ -97,9 +107,28 @@ struct VoiceParameters
     std::atomic<float> lfoToPitchDepthOctaves { 0.0f };
     std::atomic<float> lfoToCutoffDepthOctaves { 0.0f };
 
+    //==============================================================================
+    // Item 4 (note handling).
+
+    // Discrete, no smoother - matches envelopeDestination and lfoWaveform.
+    // Retrigger by default: it continues item 3's already-ear-verified
+    // behaviour, where every note-on plucks. Legato is the opt-in mode.
+    std::atomic<int> legatoRetriggerMode { (int) LegatoRetriggerMode::Retrigger };
+
+    // Discrete, no smoother. architecture.md leaves last-vs-highest note
+    // priority explicitly open ("try both by ear"), so this is a runtime
+    // switch and LastNote is only a provisional pick - the near-universal
+    // mono-synth default, including the SH-101's.
+    std::atomic<int> notePriorityMode { (int) NotePriorityMode::LastNote };
+
+    // Seconds to glide ONE OCTAVE - a rate, not a per-interval duration. Time
+    // constant, so NOT smoothed, same as the ADSR times and lfoRateHz.
+    // 0 = instant/off, which is the safe first-load default.
+    std::atomic<float> glideTimeSeconds { 0.0f };
+
     static_assert (std::atomic<float>::is_always_lock_free,
                    "Parameter stores must not take a lock on the message thread "
                    "or block the audio thread reading them.");
-    static_assert (std::atomic<bool>::is_always_lock_free,
+    static_assert (std::atomic<int>::is_always_lock_free,
                    "Same requirement as the float parameters above.");
 };

@@ -54,8 +54,21 @@ Build/validate everything here before touching Android.
       click-free, S&H sounds stepped not smooth, and LFO→pitch/LFO→cutoff
       stay in lockstep. Ticked because the build work is done; revisit this
       box if any of those three say otherwise
-- [ ] **4. Mono note handling** — note-priority logic, glide/legato vs.
-      retrigger; drive via USB MIDI keyboard or computer-keyboard input
+- [x] **4. Mono note handling** — note-priority logic, glide/legato vs.
+      retrigger; drive via USB MIDI keyboard or computer-keyboard input.
+      Design + build order: [note-handling-design.md](note-handling-design.md).
+      Builds clean (Debug + Release, zero warnings), all 8 steps done. Three
+      input sources (QWERTY, on-screen keyboard, MIDI) feed one lock-free
+      event path → note-priority stack → voice, so priority/glide/legato
+      behave identically whichever is used. Three Debug self-tests cover the
+      FIFO, the priority stack and MIDI message conversion.
+      **Two caveats, neither resolved:**
+      (a) **MIDI was never tested against physical hardware** — none was
+      available. Conversion logic is self-tested; device enumeration and
+      callback registration are not. Re-check when a device is to hand.
+      (b) The **last-note vs. highest-note** open decision is deliberately
+      *not* settled — it's a live combo box so it can be chosen by ear, per
+      architecture.md. Still open there.
 - [ ] **5. Arpeggiator** — pattern modes (up/down/up-down/random/as-played),
       sample-accurate clock (not `Timer`-based), rate control
 - [ ] **6. UI pass** — knobs/controls for what's built so far, mouse-driven;

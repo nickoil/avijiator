@@ -3,6 +3,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include "Adsr.h"
+#include "Glide.h"
 #include "Lfo.h"
 #include "NoiseGenerator.h"
 #include "PolyBlepOscillator.h"
@@ -28,6 +29,11 @@
     independently. All three modulation summing points item 2 left at zero
     are filled in. Built incrementally per
     documents/envelope-lfo-design.md section 7.
+
+    Item 4 (note handling): pitch is no longer a UI parameter - it arrives as
+    note events and is owned by Glide, with legato/retrigger deciding whether
+    an overlapping note restarts the envelope. See
+    documents/note-handling-design.md.
 */
 class SynthVoice
 {
@@ -44,14 +50,41 @@ public:
 
     VoiceParameters& getParameters() noexcept { return parameters; }
 
+    //==============================================================================
+    // Note control. AUDIO THREAD ONLY - NoteRouter calls these after draining
+    // its event FIFOs at the top of a block. Never call them from the message
+    // thread; that is what the FIFOs are for.
+    //
+    // Three methods, not two, and the third is load-bearing: noteOn() cannot
+    // tell "a key went down" from "a key came up, revealing another still
+    // held" by itself, and conflating those would make Retrigger mode
+    // re-pluck on every note-off inside a chord. See
+    // documents/note-handling-design.md section 5.
+
+    // A key went down. Legato/retrigger mode decides whether this restarts
+    // the envelope, but only when a note was already sounding.
+    void noteOn (float pitchLog2Hz, float velocity) noexcept;
+
+    // A key came up and another is still held. Pitch moves; the envelope is
+    // never restarted, in either mode.
+    void retargetPitch (float pitchLog2Hz) noexcept;
+
+    // Every key is now up.
+    void noteOff() noexcept;
+
 private:
     void snapshotParameters (bool jumpImmediately) noexcept;
 
-    // Audio-thread-only record of the gate's last known state, so the edge
-    // (not just the level) can be detected safely from inside
-    // renderNextBlock. Never touched from the message thread - the button
-    // only ever writes VoiceParameters::gate.
-    bool lastGateState = false;
+    // Audio-thread-private. Distinguishes "a note is already sounding" from
+    // silence, which is the overlap signal legato/retrigger keys off.
+    bool voiceGated = false;
+
+    // Captured but not routed anywhere yet - item 7's accent and
+    // character-and-vim.md B5's velocity routing are the eventual consumers.
+    // Declared now for the same reason item 2 pre-declared its modulation
+    // summing points at zero: so filling it in later is an edit, not a
+    // restructure.
+    float currentVelocity = 0.0f;
 
     using Smoothed = juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>;
 
@@ -61,6 +94,11 @@ private:
     // it gets a deliberately slower ramp than everything else.
     static constexpr double resonanceRampSeconds = 0.05;
 
+    // log2(261.63) - middle C. Only a defined resting value for the glide
+    // ramp before any note has ever played; the first note-on snaps away from
+    // it, so it is never heard.
+    static constexpr float defaultPitchLog2Hz = 8.0313f;
+
     VoiceParameters parameters;
     PolyBlepOscillator oscillator;
     NoiseGenerator noise;
@@ -68,11 +106,17 @@ private:
     Adsr envelope;
     Lfo lfo;
 
+    // Owns the base pitch outright - this REPLACED item 3's pitchLog2Smoothed
+    // rather than layering on top of it. That smoother was a 20ms anti-zipper
+    // ramp on a debug slider; glide IS the note-to-note pitch transition, so
+    // modelling it as a second additive ramp would mean implementing the same
+    // thing twice. See documents/note-handling-design.md section 4.
+    Glide glide;
+
     // Linear smoothing on a log2(Hz) value IS multiplicative smoothing of the
     // frequency, which is the musically correct sweep - and it sidesteps
     // ValueSmoothingTypes::Multiplicative's strictly-positive constraint. One
     // smoother type everywhere.
-    Smoothed pitchLog2Smoothed;
     Smoothed sawLevelSmoothed;
     Smoothed pulseLevelSmoothed;
     Smoothed pulseWidthSmoothed;
