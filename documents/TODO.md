@@ -45,7 +45,8 @@ Build/validate everything here before touching Android.
       do, and hasn't happened yet.** Ticked because the build work is done;
       revisit this box if that A/B says otherwise
 - [ ] **3. Envelope + LFO** — shared ADSR routing (filter/amp/both), LFO →
-      pitch and/or filter cutoff
+      pitch and/or filter cutoff.
+      Design + build order: [envelope-lfo-design.md](envelope-lfo-design.md)
 - [ ] **4. Mono note handling** — note-priority logic, glide/legato vs.
       retrigger; drive via USB MIDI keyboard or computer-keyboard input
 - [ ] **5. Arpeggiator** — pattern modes (up/down/up-down/random/as-played),

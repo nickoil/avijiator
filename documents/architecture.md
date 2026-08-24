@@ -40,6 +40,10 @@ Modulation:
 - **LFO** (triangle / square / random) → pitch and/or filter cutoff
 - **Portamento/glide** on pitch, with legato vs. retrigger mode switch
 
+The envelope and LFO are specified in detail — ADSR state machine, the gate
+edge-detection pattern, LFO waveform math, routing, and parameter smoothing — in
+[envelope-lfo-design.md](envelope-lfo-design.md).
+
 ## Voice architecture (core, shared across both note-input modes)
 
 - **Monophonic** — single voice, no polyphony
