@@ -33,7 +33,9 @@ target_sources(Avijiator
         Source/MainComponent.cpp
         Source/DSP/PolyBlepOscillator.cpp
         Source/DSP/SynthVoice.cpp
-        Source/DSP/Vcf.cpp)
+        Source/DSP/Vcf.cpp
+        Source/DSP/Adsr.cpp
+        Source/DSP/Lfo.cpp)
 
 # Quoted includes already resolve relative to the including file, so this is
 # convenience, not a requirement. Keep writing includes in relative form

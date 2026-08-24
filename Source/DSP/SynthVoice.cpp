@@ -7,6 +7,8 @@ void SynthVoice::prepare (double newSampleRate)
 {
     oscillator.prepare (newSampleRate);
     filter.prepare (newSampleRate);
+    envelope.prepare (newSampleRate);
+    lfo.prepare (newSampleRate);
 
     pitchLog2Smoothed.reset (newSampleRate, rampSeconds);
     sawLevelSmoothed.reset (newSampleRate, rampSeconds);
@@ -17,6 +19,10 @@ void SynthVoice::prepare (double newSampleRate)
     cutoffLog2Smoothed.reset (newSampleRate, rampSeconds);
     resonanceSmoothed.reset (newSampleRate, resonanceRampSeconds);
     outputLevelSmoothed.reset (newSampleRate, rampSeconds);
+    sustainLevelSmoothed.reset (newSampleRate, rampSeconds);
+    envToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
+    lfoToPitchDepthSmoothed.reset (newSampleRate, rampSeconds);
+    lfoToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
 
     snapshotParameters (true); // jump straight to target - block 1 shouldn't ramp up from zero
 }
@@ -26,6 +32,9 @@ void SynthVoice::reset() noexcept
     oscillator.reset();
     noise.reset();
     filter.reset();
+    envelope.reset();
+    lfo.reset();
+    lastGateState = false;
 }
 
 void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
@@ -47,6 +56,10 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
     apply (cutoffLog2Smoothed,  parameters.cutoffLog2Hz.load (std::memory_order_relaxed));
     apply (resonanceSmoothed,   parameters.resonance   .load (std::memory_order_relaxed));
     apply (outputLevelSmoothed, parameters.outputLevel .load (std::memory_order_relaxed));
+    apply (sustainLevelSmoothed, parameters.sustainLevel.load (std::memory_order_relaxed));
+    apply (envToCutoffDepthSmoothed, parameters.envToCutoffDepthOctaves.load (std::memory_order_relaxed));
+    apply (lfoToPitchDepthSmoothed, parameters.lfoToPitchDepthOctaves.load (std::memory_order_relaxed));
+    apply (lfoToCutoffDepthSmoothed, parameters.lfoToCutoffDepthOctaves.load (std::memory_order_relaxed));
 }
 
 void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
@@ -57,17 +70,63 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
     // every block boundary.
     snapshotParameters (false);
 
-    // Amplitude modulation summing point - item 3's shared ADSR (when routed
-    // to the VCA) and item 7's accent multiply in here. Multiplicative and
-    // unity-defaulted, unlike the additive-octaves pitch point below.
-    const auto amplitudeModulation = 1.0f;
+    // Gate edge detection, on the audio thread, from an atomic the message
+    // thread only ever writes to - never call into stateful envelope methods
+    // directly from a button callback, that would be an unsynchronized write
+    // into audio-thread state. See documents/envelope-lfo-design.md section 2.
+    const auto gateNow = parameters.gate.load (std::memory_order_relaxed);
+    if (gateNow != lastGateState)
+    {
+        if (gateNow) envelope.noteOn(); else envelope.noteOff();
+        lastGateState = gateNow;
+    }
+
+    // Envelope times are read once per block, not smoothed - see
+    // documents/envelope-lfo-design.md section 5: changing one only affects
+    // the rate of future samples, not the current output value, so there's no
+    // click to smooth away. Sustain level IS smoothed (sustainLevelSmoothed),
+    // because it's directly assigned as the output level during Sustain - fed
+    // to the envelope once per sample, inside the loop below.
+    envelope.setAttackSeconds  (parameters.attackSeconds .load (std::memory_order_relaxed));
+    envelope.setDecaySeconds   (parameters.decaySeconds  .load (std::memory_order_relaxed));
+    envelope.setReleaseSeconds (parameters.releaseSeconds.load (std::memory_order_relaxed));
+
+    // Envelope destination is a discrete switch, read once per block like the
+    // times above - see documents/envelope-lfo-design.md section 5.
+    const auto envDestination = (EnvelopeDestination) parameters.envelopeDestination.load (std::memory_order_relaxed);
+    const auto routeEnvToFilter = envDestination == EnvelopeDestination::Filter || envDestination == EnvelopeDestination::Both;
+    const auto routeEnvToAmp    = envDestination == EnvelopeDestination::Amp    || envDestination == EnvelopeDestination::Both;
+
+    // LFO waveform and rate: discrete switch and time constant respectively,
+    // both read once per block like everything else in this category - see
+    // documents/envelope-lfo-design.md section 5.
+    lfo.setWaveform ((Lfo::Waveform) parameters.lfoWaveform.load (std::memory_order_relaxed));
+    lfo.setRate (parameters.lfoRateHz.load (std::memory_order_relaxed));
 
     for (int i = 0; i < numSamples; ++i)
     {
-        // Pitch modulation summing point, in octaves. Item 3's LFO -> pitch
-        // adds here, and item 4's glide adds its offset here too. Octaves
-        // rather than Hz so modulators compose musically at any pitch.
-        const auto pitchModulationOctaves = 0.0f;
+        envelope.setSustainLevel (sustainLevelSmoothed.getNextValue());
+
+        // Envelope value, 0..1. Called exactly once per sample here and
+        // reused for both destinations below - pulling two different samples
+        // of it in two places would desync envelope and audio.
+        const auto envValue = envelope.processSample();
+
+        // LFO value, bipolar -1..1. Also called exactly once per sample and
+        // reused for both destinations below, for the same reason as envValue.
+        const auto lfoValue = lfo.processSample();
+
+        // Amplitude modulation summing point - the shared ADSR (when routed
+        // to the VCA) and item 7's accent multiply in here. Multiplicative
+        // and unity-defaulted when not routed here, unlike the
+        // additive-octaves pitch/cutoff points, which are additive and
+        // zero-defaulted.
+        const auto amplitudeModulation = routeEnvToAmp ? envValue : 1.0f;
+
+        // Pitch modulation summing point, in octaves. Item 4's glide will add
+        // its offset here too. Octaves rather than Hz so modulators compose
+        // musically at any pitch.
+        const auto pitchModulationOctaves = lfoValue * lfoToPitchDepthSmoothed.getNextValue();
 
         const auto pitchOctaves = pitchLog2Smoothed.getNextValue() + pitchModulationOctaves;
         oscillator.setFrequency (std::exp2 (pitchOctaves));
@@ -83,12 +142,14 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
                        + frame.sub           * subLevelSmoothed.getNextValue()
                        + noise.processSample() * noiseLevelSmoothed.getNextValue();
 
-        // Cutoff modulation summing point, in octaves - and unlike pitch,
-        // TWO sources land here at item 3: the shared ADSR (env amount) and
-        // the LFO. Octaves rather than Hz because a modulator that moves the
-        // cutoff by a fixed number of Hz sounds completely different at
-        // 200 Hz and at 5 kHz. The exp2 happens inside Vcf, after this sum.
-        const auto cutoffModulationOctaves = 0.0f;
+        // Cutoff modulation summing point, in octaves - and unlike pitch, TWO
+        // sources land here: the shared envelope and the LFO. Octaves rather
+        // than Hz because a modulator that moves the cutoff by a fixed number
+        // of Hz sounds completely different at 200 Hz and at 5 kHz. The exp2
+        // happens inside Vcf, after this sum.
+        const auto cutoffModulationOctaves =
+            (routeEnvToFilter ? envValue * envToCutoffDepthSmoothed.getNextValue() : 0.0f)
+            + lfoValue * lfoToCutoffDepthSmoothed.getNextValue();
 
         const auto cutoffOctaves = cutoffLog2Smoothed.getNextValue() + cutoffModulationOctaves;
         const auto filtered = filter.processSample (mix, cutoffOctaves, resonanceSmoothed.getNextValue());

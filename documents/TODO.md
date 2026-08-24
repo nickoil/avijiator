@@ -44,9 +44,16 @@ Build/validate everything here before touching Android.
       family" with real SH-101 recordings — is a listening test only you can
       do, and hasn't happened yet.** Ticked because the build work is done;
       revisit this box if that A/B says otherwise
-- [ ] **3. Envelope + LFO** — shared ADSR routing (filter/amp/both), LFO →
+- [x] **3. Envelope + LFO** — shared ADSR routing (filter/amp/both), LFO →
       pitch and/or filter cutoff.
-      Design + build order: [envelope-lfo-design.md](envelope-lfo-design.md)
+      Design + build order: [envelope-lfo-design.md](envelope-lfo-design.md).
+      Builds clean (Debug + Release, zero warnings), all six build steps
+      done, envelope routable Filter/Amp/Both, LFO (triangle/square/S&H)
+      routable pitch and/or cutoff independently. **Three things are a
+      listening test only you can do, not yet confirmed**: retrigger is
+      click-free, S&H sounds stepped not smooth, and LFO→pitch/LFO→cutoff
+      stay in lockstep. Ticked because the build work is done; revisit this
+      box if any of those three say otherwise
 - [ ] **4. Mono note handling** — note-priority logic, glide/legato vs.
       retrigger; drive via USB MIDI keyboard or computer-keyboard input
 - [ ] **5. Arpeggiator** — pattern modes (up/down/up-down/random/as-played),

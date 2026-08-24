@@ -220,22 +220,33 @@ complicating the existing one:
 struct DebugChoiceSpec
 {
     const char* name;
-    juce::StringArray choices;
+    const char* const* choices;  // plain array + count, not juce::StringArray -
+    int numChoices;              // simpler as a static-storage-duration table
     int defaultIndex;
     std::atomic<int> VoiceParameters::* target;
 };
 ```
 
+(Built as `const char* const*` + count rather than the `juce::StringArray` first
+sketched here — a plain array is simpler to declare as a `static const` table at
+namespace scope, matching `debugControlSpecs`' existing style.)
+
 with its own tiny array of `{ juce::ComboBox, juce::Label }` and construction loop,
 mirroring the float table's loop but wiring `comboBox.onChange` instead of
 `slider.onValueChange`.
+
+**Implementation gotcha**: `juce::ComboBox` item IDs are 1-based — 0 is reserved to
+mean "no selection." So the wiring stores `choice index + 1` via `addItem`, and
+subtracts 1 back off when reading `getSelectedId()`. Easy to miss, would otherwise
+off-by-one every enum value.
 
 The Gate button writes directly:
 `voice.getParameters().gate.store (isDown, std::memory_order_relaxed);` — no
 reflection table needed for one button.
 
 **Window resize required.** Nine existing rows plus eleven new controls won't fit
-600×400 — grow the window (~600×700) as part of step 1/4, not deferred to Polish.
+600×400 — grow the window (built as 640×720) as part of step 1/4, not deferred to
+Polish.
 
 ### CMakeLists.txt
 
@@ -310,13 +321,32 @@ S&H character is "right" for this instrument.
 
 ---
 
-## 9. JUCE APIs to flag rather than guess
+## 9. JUCE APIs — flagged, then resolved
 
-- **`juce::Button::onStateChange`** (or similar) for press/release detection on
-  the Gate button — moderate confidence this exists and fires on down/up
-  transitions via `button.isDown()`, but not reading library sources to confirm.
-  Fallback if it doesn't behave as expected: subclass `juce::Component` and
-  override `mouseDown`/`mouseUp` directly, which is unambiguous.
+- **Gate button press/release**: `juce::Button::onStateChange` was flagged here as
+  moderate-confidence, unverified. Rather than gamble on it, the build went
+  straight to the unambiguous fallback: `GateButton` subclasses `juce::TextButton`
+  and overrides `mouseDown`/`mouseUp` directly, chaining to the base class first so
+  the button's own visual state keeps working. `onStateChange` was never tried.
+- **`juce::ComboBox`** (`addItem`, `setSelectedId`, `getSelectedId`, `onChange`) —
+  high confidence going in, confirmed correct. No surprises, see the 1-based ID
+  gotcha in section 6.
+
+---
+
+## 9a. Actual values chosen — starting points, not derived
+
+Mirrors `dsp-voice-design.md` section 8's convention: these are what the debug
+sliders were built with, all by-ear starting points, not derived constants.
+
+| Parameter | Range | Default |
+|---|---|---|
+| Attack / Decay / Release | 0.001s – 5.0s | 10ms / 100ms / 300ms |
+| Sustain | 0 – 1 | 0.7 |
+| Env → Cutoff Depth | 0 – 8 octaves | 0 (off) |
+| LFO Rate | 0.02 Hz – 20 Hz | 2.0 Hz |
+| LFO → Pitch Depth | 0 – 1 octave | 0 (off) |
+| LFO → Cutoff Depth | 0 – 8 octaves | 0 (off) |
 
 ---
 
