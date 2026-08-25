@@ -198,6 +198,49 @@ void runNoteStackSelfTest()
     }
 
     //==========================================================================
+    // THE PRESS-ORDER GUARANTEE THE ARPEGGIATOR DEPENDS ON. Item 5's AsPlayed
+    // pattern walks getHeldNotes() directly, so "compacting a removal
+    // preserves press order" stops being an internal implementation detail
+    // and becomes a contract - asserted here rather than left as a comment on
+    // removeIfPresent.
+    {
+        NoteStack stack;
+        constexpr auto mode = NotePriorityMode::LastNote;
+
+        press (stack, c4, mode);
+        press (stack, g4, mode);
+        press (stack, e4, mode);
+
+        auto held = stack.getHeldNotes();
+        jassert (held.size() == 3);
+        jassert (held[0].noteNumber == c4 && held[1].noteNumber == g4 && held[2].noteNumber == e4);
+
+        // Removing from the MIDDLE is the case that would break if the
+        // compaction swapped with the last entry instead of shifting down.
+        stack.noteOff (g4, mode);
+
+        held = stack.getHeldNotes();
+        jassert (held.size() == 2);
+        jassert (held[0].noteNumber == c4 && held[1].noteNumber == e4);
+        jassert (held[0].pitchLog2Hz == testPitchFor (c4)); // the whole note travels, not just its number
+
+        // getCurrentResolution re-resolves the CURRENT set without a note
+        // event happening - what the arpeggiator calls when it hands the voice
+        // back with the keys still down.
+        const auto r = stack.getCurrentResolution (mode);
+        jassert (r.isSounding && r.noteNumber == e4);
+        jassert (stack.getCurrentResolution (NotePriorityMode::HighestNote).noteNumber == e4);
+        jassert (stack.getNumHeldNotes() == 2); // and changes nothing
+    }
+    {
+        // An empty stack yields an empty view and a silent resolution, so the
+        // arp's "nothing held" path is reached rather than a stale note.
+        NoteStack stack;
+        jassert (stack.getHeldNotes().empty());
+        jassert (! stack.getCurrentResolution (NotePriorityMode::LastNote).isSounding);
+    }
+
+    //==========================================================================
     // reset() clears everything, for SynthVoice::reset()'s benefit.
     {
         NoteStack stack;

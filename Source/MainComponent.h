@@ -6,8 +6,10 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include "Arpeggiator.h"
 #include "DSP/NoteEvent.h"
 #include "DSP/NoteStack.h"
+#include "DSP/StepClock.h"
 #include "DSP/SynthVoice.h"
 #include "NoteRouter.h"
 #include "QwertyNoteInput.h"
@@ -92,7 +94,7 @@ private:
 
     // Sizing the definition to this count makes the compiler enforce that the
     // table and the array stay in step.
-    static constexpr int numDebugControls = 17;
+    static constexpr int numDebugControls = 19;
     static const DebugControlSpec debugControlSpecs[numDebugControls];
 
     // Discrete switches (Envelope Destination, later LFO Waveform) don't fit
@@ -113,7 +115,7 @@ private:
         std::atomic<int> VoiceParameters::* target;
     };
 
-    static constexpr int numDebugChoiceControls = 4;
+    static constexpr int numDebugChoiceControls = 8;
     static const DebugChoiceSpec debugChoiceSpecs[numDebugChoiceControls];
 
     // A button that reports press AND release, not just "clicked".
@@ -189,6 +191,18 @@ private:
     // of each block.
     NoteRouter router;
     QwertyNoteInput qwertyInput;
+
+    // A peer of the voice and the router, not part of either: it owns the step
+    // clock, the walker and the gate, and decides WHICH note happens WHEN.
+    // When it is switched off the audio path below is byte-identical to item
+    // 4's.
+    Arpeggiator arp;
+
+    // AUDIO-THREAD-PRIVATE. Edge-detects the arpEnabled atomic, because
+    // switching the arp on or off is a HAND-OVER of the voice between two
+    // owners, and both sides have to be told - see
+    // documents/arpeggiator-design.md section 7.
+    bool arpWasOn = false;
 
     // Opens JUCE's device selector. Without it the app just takes whatever
     // JUCE defaults to - on Windows that's WASAPI shared mode, whose latency

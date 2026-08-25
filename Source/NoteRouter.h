@@ -42,15 +42,65 @@ public:
     void pushMidiEvent (const NoteEvent& event) noexcept { midiEvents.push (event); }
 
     //==============================================================================
+    /*
+        Whether draining events should actually drive the voice.
+
+        In TrackOnly the held-note stack is still updated exactly as before -
+        held-note tracking stays live in BOTH modes, which is precisely what
+        makes the arp on/off transitions cheap - but no voice.* call is made
+        and voiceIsSounding is left alone. Those fields are then only ever
+        written by whichever side actually owns the voice.
+
+        See documents/arpeggiator-design.md section 6.
+    */
+    enum class VoiceDrive : int { Direct = 0, TrackOnly = 1 };
+
+    //==============================================================================
     // AUDIO THREAD only - call at the top of a block, before rendering.
-    void dispatchPendingEvents (SynthVoice& voice, NotePriorityMode priorityMode) noexcept;
+    void dispatchPendingEvents (SynthVoice& voice, NotePriorityMode priorityMode,
+                                 VoiceDrive drive) noexcept;
+
+    // AUDIO THREAD only. The arpeggiator walks this, read-only - it is never
+    // moved out of here, because giving audio-thread-private state two owners
+    // would buy nothing.
+    const NoteStack& getNoteStack() const noexcept { return noteStack; }
+
+    /*
+        Stop driving the voice, leaving it SILENT.
+
+        IDEMPOTENT, and paired with Arpeggiator::releaseVoice: MainComponent
+        calls both on every arp on/off transition and exactly one of them
+        actually does anything, which is what makes a stuck note unreachable by
+        any toggle order. Without this, handing the voice to the arp would
+        leave the router's sustained note with no note-off and its belief
+        stale - so a later arp-OFF would give silence with a key still held
+        (T1), which is as bad as a note stuck on.
+
+        AUDIO THREAD.
+    */
+    void releaseVoice (SynthVoice& voice) noexcept;
+
+    /*
+        Take the voice back and sound the current held resolution AT ONCE,
+        rather than waiting for the next key event (T2). The keys are still
+        down, so something must sound again immediately - a chord held through
+        an arp-OFF that stayed silent until the next press would be the same
+        class of failure as a stuck note.
+
+        Starts from silence, per the hand-over invariant, so this is a
+        noteOn - never retargetPitch.
+
+        AUDIO THREAD.
+    */
+    void retakeVoice (SynthVoice& voice, NotePriorityMode priorityMode) noexcept;
 
     // AUDIO THREAD only. Clears held notes, so a device change can't leave a
     // phantom note held forever.
     void reset() noexcept;
 
 private:
-    void apply (const NoteEvent& event, SynthVoice& voice, NotePriorityMode priorityMode) noexcept;
+    void apply (const NoteEvent& event, SynthVoice& voice, NotePriorityMode priorityMode,
+                 VoiceDrive drive) noexcept;
 
     NoteEventFifo midiEvents;
     NoteEventFifo uiEvents;

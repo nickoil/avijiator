@@ -130,5 +130,22 @@ private:
     Smoothed lfoToPitchDepthSmoothed;
     Smoothed lfoToCutoffDepthSmoothed;
 
+    // The change-guard for snapshotParameters - see documents/arpeggiator-design.md
+    // section 13 point 1. One cache per smoother, mirroring the list above.
+    // Values are meaningless until the first prepare() call, which always runs
+    // with jumpImmediately - so nothing reads a cache before it is written.
+    float lastSawLevel = 0.0f;
+    float lastPulseLevel = 0.0f;
+    float lastPulseWidth = 0.0f;
+    float lastSubLevel = 0.0f;
+    float lastNoiseLevel = 0.0f;
+    float lastCutoffLog2 = 0.0f;
+    float lastResonance = 0.0f;
+    float lastOutputLevel = 0.0f;
+    float lastSustainLevel = 0.0f;
+    float lastEnvToCutoffDepth = 0.0f;
+    float lastLfoToPitchDepth = 0.0f;
+    float lastLfoToCutoffDepth = 0.0f;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)
 };

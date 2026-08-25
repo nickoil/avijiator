@@ -131,6 +131,11 @@ as a second input mode once the voice is solid.
 - Sample-accurate step timing: don't rely on a coarse `Timer` — schedule
   note-on/off against exact sample positions within each audio block
 
+The clock (BPM + subdivision, drift-free), the pattern walker, hold/latch, and
+the voice hand-over between held-note and arp control are specified in
+[arpeggiator-design.md](arpeggiator-design.md). Its `StepClock` is the piece the
+step sequencer below inherits.
+
 ### Step sequencer logic (phase 2)
 - Fixed-length pattern (e.g. 16 steps, page-able for longer patterns)
 - Per step: pitch, gate on/off, **accent** flag, **slide** flag

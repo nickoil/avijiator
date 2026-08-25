@@ -4,6 +4,13 @@
 
 #include "Lfo.h"
 #include "NoteStack.h"
+#include "StepClock.h"
+
+// For ArpPattern. The arpeggiator is a PEER class, not part of the voice, so
+// this is admittedly the wrong direction for a DSP header to point - see the
+// note above the item 5 block below. No cycle: Arpeggiator.h forward-declares
+// SynthVoice and includes nothing from here.
+#include "../Arpeggiator.h"
 
 //==============================================================================
 /*
@@ -125,6 +132,40 @@ struct VoiceParameters
     // constant, so NOT smoothed, same as the ADSR times and lfoRateHz.
     // 0 = instant/off, which is the safe first-load default.
     std::atomic<float> glideTimeSeconds { 0.0f };
+
+    //==============================================================================
+    // Item 5 (arpeggiator).
+    //
+    // Strictly NOT voice parameters - the arp is a peer class owned by
+    // MainComponent and touches no DSP - but they share the one UI -> audio
+    // channel, and MainComponent's spec tables are typed against this struct.
+    // Splitting them out would buy purity and cost a second spec table; item
+    // 6's real UI pass is the place to revisit that. See
+    // documents/arpeggiator-design.md section 9.
+    //
+    // None of the six is smoothed, and each was checked against the three
+    // conventions above rather than assumed.
+
+    // Discrete switches, raw per block - identical treatment to
+    // envelopeDestination, lfoWaveform and notePriorityMode. Off on first
+    // load: the instrument must play normally out of the box.
+    std::atomic<int> arpEnabled { 0 };
+    std::atomic<int> arpPattern { (int) ArpPattern::Up };
+    std::atomic<int> arpDivision { (int) StepDivision::Sixteenth };
+    std::atomic<int> arpHold { 0 };
+
+    // A TIME CONSTANT, raw per block - same category as lfoRateHz and the ADSR
+    // times: it is never assigned as an output, and changing it affects only
+    // the length of FUTURE steps. Smoothing it would be actively wrong rather
+    // than merely wasteful, since it is consumed once per STEP rather than per
+    // sample - a smoother would low-pass a value nobody reads continuously.
+    std::atomic<float> arpTempoBpm { 120.0f };
+
+    // A FRACTION of the step, not a time, so changing tempo does not also
+    // change articulation. Read at exactly one instant per step, so likewise
+    // unsmoothed. Clamped to 0.05-0.95 by the arpeggiator: 100% is not "a
+    // longer gate" but a different feature - see section 10.
+    std::atomic<float> arpGateLength { 0.5f };
 
     static_assert (std::atomic<float>::is_always_lock_free,
                    "Parameter stores must not take a lock on the message thread "

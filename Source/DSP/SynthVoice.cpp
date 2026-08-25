@@ -90,26 +90,41 @@ void SynthVoice::noteOff() noexcept
 
 void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
 {
-    const auto apply = [jumpImmediately] (Smoothed& smoother, float value)
+    // Change-guard: renderNextBlock calls this once per block normally, but
+    // 2-3 times when the arp lands more than one step in a block (see
+    // documents/arpeggiator-design.md section 3). Whether repeatedly calling
+    // SmoothedValue::setTargetValue with an UNCHANGED target restarts its ramp
+    // was flagged unconfirmed in arpeggiator-design.md section 13 point 1 -
+    // this guard makes the answer not matter, by simply not calling it again
+    // when the value has not moved. Costs one float comparison per parameter;
+    // the jump path (prepare() only, once) always applies and refreshes the
+    // cache regardless, so it stays correct either way.
+    const auto apply = [jumpImmediately] (Smoothed& smoother, float& lastStored, float value)
     {
         if (jumpImmediately)
+        {
             smoother.setCurrentAndTargetValue (value);
-        else
+            lastStored = value;
+        }
+        else if (value != lastStored)
+        {
             smoother.setTargetValue (value);
+            lastStored = value;
+        }
     };
 
-    apply (sawLevelSmoothed,    parameters.sawLevel    .load (std::memory_order_relaxed));
-    apply (pulseLevelSmoothed,  parameters.pulseLevel  .load (std::memory_order_relaxed));
-    apply (pulseWidthSmoothed,  parameters.pulseWidth  .load (std::memory_order_relaxed));
-    apply (subLevelSmoothed,    parameters.subLevel    .load (std::memory_order_relaxed));
-    apply (noiseLevelSmoothed,  parameters.noiseLevel  .load (std::memory_order_relaxed));
-    apply (cutoffLog2Smoothed,  parameters.cutoffLog2Hz.load (std::memory_order_relaxed));
-    apply (resonanceSmoothed,   parameters.resonance   .load (std::memory_order_relaxed));
-    apply (outputLevelSmoothed, parameters.outputLevel .load (std::memory_order_relaxed));
-    apply (sustainLevelSmoothed, parameters.sustainLevel.load (std::memory_order_relaxed));
-    apply (envToCutoffDepthSmoothed, parameters.envToCutoffDepthOctaves.load (std::memory_order_relaxed));
-    apply (lfoToPitchDepthSmoothed, parameters.lfoToPitchDepthOctaves.load (std::memory_order_relaxed));
-    apply (lfoToCutoffDepthSmoothed, parameters.lfoToCutoffDepthOctaves.load (std::memory_order_relaxed));
+    apply (sawLevelSmoothed,    lastSawLevel,    parameters.sawLevel    .load (std::memory_order_relaxed));
+    apply (pulseLevelSmoothed,  lastPulseLevel,  parameters.pulseLevel  .load (std::memory_order_relaxed));
+    apply (pulseWidthSmoothed,  lastPulseWidth,  parameters.pulseWidth  .load (std::memory_order_relaxed));
+    apply (subLevelSmoothed,    lastSubLevel,    parameters.subLevel    .load (std::memory_order_relaxed));
+    apply (noiseLevelSmoothed,  lastNoiseLevel,  parameters.noiseLevel  .load (std::memory_order_relaxed));
+    apply (cutoffLog2Smoothed,  lastCutoffLog2,  parameters.cutoffLog2Hz.load (std::memory_order_relaxed));
+    apply (resonanceSmoothed,   lastResonance,   parameters.resonance   .load (std::memory_order_relaxed));
+    apply (outputLevelSmoothed, lastOutputLevel, parameters.outputLevel .load (std::memory_order_relaxed));
+    apply (sustainLevelSmoothed, lastSustainLevel, parameters.sustainLevel.load (std::memory_order_relaxed));
+    apply (envToCutoffDepthSmoothed, lastEnvToCutoffDepth, parameters.envToCutoffDepthOctaves.load (std::memory_order_relaxed));
+    apply (lfoToPitchDepthSmoothed, lastLfoToPitchDepth, parameters.lfoToPitchDepthOctaves.load (std::memory_order_relaxed));
+    apply (lfoToCutoffDepthSmoothed, lastLfoToCutoffDepth, parameters.lfoToCutoffDepthOctaves.load (std::memory_order_relaxed));
 }
 
 void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept

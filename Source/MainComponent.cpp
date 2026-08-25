@@ -26,6 +26,16 @@ const MainComponent::DebugControlSpec MainComponent::debugControlSpecs[numDebugC
     { "LFO->Pitch",    0.0,    1.0,   0.0, false, &VoiceParameters::lfoToPitchDepthOctaves },
     { "LFO->Cutoff",   0.0,    8.0,   0.0, false, &VoiceParameters::lfoToCutoffDepthOctaves },
     { "Glide Time",    0.0,    5.0,   0.0, false, &VoiceParameters::glideTimeSeconds },
+    // Range matches StepClock's own clamp, so the slider cannot ask for
+    // something the clock will silently refuse.
+    { "Arp Tempo",    20.0,  300.0, 120.0, false, &VoiceParameters::arpTempoBpm },
+    // Range matches the arpeggiator's own clamp, for the same reason as Arp
+    // Tempo's above. A FRACTION of the step, not a time, so changing tempo does
+    // not also change articulation. 100% is deliberately out of reach: it would
+    // turn each step from a fresh press into a legato retarget, which is a
+    // different feature (Tie mode) rather than just a longer gate - see
+    // documents/arpeggiator-design.md sections 3 and 10.
+    { "Arp Gate",     0.05,   0.95,  0.50, false, &VoiceParameters::arpGateLength },
 };
 
 // A fifth apart, so a glide between them is unmistakable.
@@ -51,6 +61,22 @@ namespace
     const char* const lfoWaveformChoices[] = { "Triangle", "Square", "S & H" };
     const char* const legatoRetriggerChoices[] = { "Retrigger", "Legato" };
     const char* const notePriorityChoices[] = { "Last Note", "Highest Note" };
+    const char* const arpEnabledChoices[] = { "Off", "On" };
+
+    // Order and text follow StepDivision exactly - longest step first, so the
+    // list reads slow -> fast and the selected index stores straight into the
+    // atomic with no mapping.
+    const char* const arpDivisionChoices[] = { "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+
+    static_assert ((int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])) == numStepDivisions,
+                   "the division combo box and StepDivision's table must stay in step");
+
+    // Order follows ArpPattern exactly, so the selected index stores straight
+    // into the atomic with no mapping - same convention as every other row here.
+    const char* const arpPatternChoices[] = { "Up", "Down", "Up-Down", "Random", "As Played" };
+
+    static_assert ((int) (sizeof (arpPatternChoices) / sizeof (arpPatternChoices[0])) == numArpPatterns,
+                   "the pattern combo box and ArpPattern must stay in step");
 }
 
 // Parallel to debugControlSpecs above, for discrete switches a Slider can't
@@ -86,6 +112,38 @@ const MainComponent::DebugChoiceSpec MainComponent::debugChoiceSpecs[numDebugCho
         (int) (sizeof (notePriorityChoices) / sizeof (notePriorityChoices[0])),
         (int) NotePriorityMode::LastNote,
         &VoiceParameters::notePriorityMode
+    },
+    {
+        "Arp",
+        arpEnabledChoices,
+        (int) (sizeof (arpEnabledChoices) / sizeof (arpEnabledChoices[0])),
+        0,                                  // off on first load
+        &VoiceParameters::arpEnabled
+    },
+    {
+        // Reuses arpEnabledChoices - same two words, and a second identical
+        // array would only be ceremony. Off on first load, same reasoning as
+        // Arp: engaging hold with nothing held must never look armed by
+        // surprise.
+        "Arp Hold",
+        arpEnabledChoices,
+        (int) (sizeof (arpEnabledChoices) / sizeof (arpEnabledChoices[0])),
+        0,
+        &VoiceParameters::arpHold
+    },
+    {
+        "Arp Pattern",
+        arpPatternChoices,
+        (int) (sizeof (arpPatternChoices) / sizeof (arpPatternChoices[0])),
+        (int) ArpPattern::Up,
+        &VoiceParameters::arpPattern
+    },
+    {
+        "Arp Division",
+        arpDivisionChoices,
+        (int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])),
+        (int) StepDivision::Sixteenth,
+        &VoiceParameters::arpDivision
     },
 };
 
@@ -170,6 +228,22 @@ MainComponent::MainComponent()
     runNoteEventFifoSelfTest();
     runNoteStackSelfTest();
     runMidiConversionSelfTest();
+
+    // Clock drift is the one failure mode in this project that cannot be
+    // caught by ear AT ALL - it is ~0.1ms per second, below human timing
+    // jitter - so this assertion is the only real check that exists for it.
+    runStepClockSelfTest();
+
+    // The arp walker fails quietly in a different way: a skipped or stuttered
+    // note when the held chord changes sounds like a playing mistake. The
+    // changing-set recipes are asserted here rather than hunted for by ear.
+    runArpPatternSelfTest();
+
+    // A stuck note is not a property of the clock, the walker or the router -
+    // it is a property of the SEAM between them, reached by a toggle order
+    // rather than by any one call being wrong. So this one drives whole blocks
+    // through the real hand-over and asserts silence in the rendered output.
+    runArpTransitionSelfTest();
    #endif
 
     for (int i = 0; i < numDebugControls; ++i)
@@ -323,7 +397,13 @@ MainComponent::MainComponent()
 
     // Two columns of controls - 21 rows in a single column needs ~700px of
     // height, which pushed the button row off the bottom of the window.
-    setSize (900, 560);
+    //
+    // 660 rather than 560 because item 5's rows overflow the taller column at
+    // the old height: 24 rows means 12 in the left column at 30px each = 360px
+    // against the 358px that existed. Bumped in the SAME step that adds the
+    // rows - note-handling-design.md records this exact overflow happening
+    // before, so it is not a Polish afterthought.
+    setSize (900, 660);
     setAudioChannels (0, 2); // no input, stereo out
 
     // After setAudioChannels, so the device manager is initialised.
@@ -412,6 +492,14 @@ MainComponent::~MainComponent()
 void MainComponent::prepareToPlay (int /*samplesPerBlockExpected*/, double sampleRate)
 {
     voice.prepare (sampleRate);
+
+    // T8: the arp's pending gate is a count of samples, so it is meaningless
+    // at a new rate. prepare() resets it along with the clock and the walker.
+    arp.prepare (sampleRate);
+
+    // Force the first block after a device change to re-run the hand-over,
+    // whichever side happens to be switched on.
+    arpWasOn = false;
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
@@ -427,20 +515,16 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
     if (buffer->getNumChannels() == 0)
         return;
 
-    // Drain queued note events before rendering, so the envelope and glide
-    // target are settled for the whole block. Block-granular rather than
-    // sample-accurate is deliberate for item 4 - human timing jitter dwarfs a
-    // block boundary, and CLAUDE.md ties sample-accuracy to item 5's arp
-    // clock specifically.
-    const auto priorityMode = (NotePriorityMode)
-        voice.getParameters().notePriorityMode.load (std::memory_order_relaxed);
-
-    router.dispatchPendingEvents (voice, priorityMode);
-
-    // Mono voice: render once into channel 0, then fan out. Item 5 splits this
-    // single call into per-step sub-blocks - the signature already allows it.
+    // Mono voice: render once into channel 0, then fan out.
     auto* mono = buffer->getWritePointer (0, startSample);
-    voice.renderNextBlock (mono, numSamples);
+
+    // The hand-over between the router and the arp, the event drain and the
+    // render all live in renderVoiceBlock - a free function rather than lines
+    // here, purely so runArpTransitionSelfTest can drive the real thing rather
+    // than a copy of it. Nothing moved out of this class's ownership: the
+    // voice, the router, the arp and arpWasOn are all still members, passed in
+    // by reference. See documents/arpeggiator-design.md section 7.
+    renderVoiceBlock (voice, router, arp, arpWasOn, mono, numSamples);
 
     for (int channel = 1; channel < buffer->getNumChannels(); ++channel)
         buffer->copyFrom (channel, startSample, mono, numSamples);
@@ -448,11 +532,15 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
 void MainComponent::releaseResources()
 {
+    // Ordered voice, router, arp: the voice goes silent first, then neither
+    // owner is left believing it is driving something. T7 - without the arp
+    // reset, a restart would resurrect an open gate mid-step.
     voice.reset();
 
     // Clear held notes too, so stopping the device can't leave a phantom note
     // latched in the stack and stick on when it restarts.
     router.reset();
+    arp.reset();
 }
 
 void MainComponent::paint (juce::Graphics& g)

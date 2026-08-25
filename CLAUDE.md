@@ -14,7 +14,12 @@ number of turns**, and the whole conversation is resent every turn — so a larg
 context costs allowance on every message, not just the one that created it.
 
 - **One TODO item per session.** Finish it, then the user runs `/clear`. Don't
-  carry the oscillator work into the filter session.
+  carry the oscillator work into the filter session. **Claude must say so
+  explicitly the moment an item's last step is done** — don't wait to be asked,
+  and don't roll straight into the next item's planning. Multi-step items may
+  span several steps in one session; `/compact` within an item, `/clear`
+  between them. The step-0 design doc in `documents/` is what makes clearing
+  cheap: a fresh session needs only "Build <step> from documents/<doc>.md".
 - **Never read JUCE library sources.** They're enormous. If you need JUCE API
   behaviour, say what you need and ask — don't go spelunking in the headers.
 - **Never dump raw build output.** MSVC template errors from JUCE run to

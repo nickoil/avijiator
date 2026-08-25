@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 
 //==============================================================================
 /*
@@ -47,17 +48,8 @@ public:
         float velocity = 0.0f;
     };
 
-    void reset() noexcept { numHeld = 0; }
-
-    bool isEmpty() const noexcept { return numHeld == 0; }
-    int getNumHeldNotes() const noexcept { return numHeld; }
-
-    Resolution noteOn (std::uint8_t noteNumber, float pitchLog2Hz, float velocity,
-                        NotePriorityMode mode) noexcept;
-
-    Resolution noteOff (std::uint8_t noteNumber, NotePriorityMode mode) noexcept;
-
-private:
+    // Public, and a POD exactly like Resolution above, because item 5's
+    // arpeggiator walks the whole held set rather than one resolved winner.
     struct HeldNote
     {
         std::uint8_t noteNumber = 0;
@@ -69,8 +61,45 @@ private:
     // is scanned only on note events, never per-sample, so the headroom is
     // free. A 17th simultaneous note is dropped rather than growing the
     // array - no allocation, ever, on any thread.
+    //
+    // Public because the arpeggiator's latched (hold) set is a fixed array of
+    // exactly this size, and the two must not drift apart.
     static constexpr int maxHeldNotes = 16;
 
+    void reset() noexcept { numHeld = 0; }
+
+    bool isEmpty() const noexcept { return numHeld == 0; }
+    int getNumHeldNotes() const noexcept { return numHeld; }
+
+    Resolution noteOn (std::uint8_t noteNumber, float pitchLog2Hz, float velocity,
+                        NotePriorityMode mode) noexcept;
+
+    Resolution noteOff (std::uint8_t noteNumber, NotePriorityMode mode) noexcept;
+
+    // A READ-ONLY view, in PRESS ORDER, oldest first. Const, so the
+    // arpeggiator can walk the set it is driven by but can never mutate it -
+    // the stack stays owned by NoteRouter and only NoteRouter.
+    //
+    // A span rather than a copy: sixteen notes is small, but this is read at
+    // every arp step on the audio thread and copying would be pure ceremony.
+    // The view is valid until the next note event, which on the audio thread
+    // means "until the next drain" - the arp uses it within one block.
+    std::span<const HeldNote> getHeldNotes() const noexcept
+    {
+        return { held.data(), (size_t) numHeld };
+    }
+
+    // Re-resolve priority against the CURRENT set without a note event
+    // happening. Used when the arpeggiator hands the voice back: the keys are
+    // still down, so something must sound again without waiting for the next
+    // key press. A one-line wrapper over the existing private resolve(), so
+    // there is no second copy of the priority rule.
+    Resolution getCurrentResolution (NotePriorityMode mode) const noexcept
+    {
+        return resolve (mode);
+    }
+
+private:
     void removeIfPresent (std::uint8_t noteNumber) noexcept;
     Resolution resolve (NotePriorityMode mode) const noexcept;
 

@@ -9,7 +9,41 @@ void NoteRouter::reset() noexcept
     soundingNoteNumber = 0;
 }
 
-void NoteRouter::dispatchPendingEvents (SynthVoice& voice, NotePriorityMode priorityMode) noexcept
+void NoteRouter::releaseVoice (SynthVoice& voice) noexcept
+{
+    // Guarded, which is what makes this idempotent - a second note-off could
+    // otherwise land on a note the ARPEGGIATOR has since started.
+    if (! voiceIsSounding)
+        return;
+
+    voice.noteOff();
+    voiceIsSounding = false;
+}
+
+void NoteRouter::retakeVoice (SynthVoice& voice, NotePriorityMode priorityMode) noexcept
+{
+    // Re-resolve priority against the CURRENT stack, with no note event having
+    // happened. TrackOnly kept that stack live the whole time the arp was
+    // driving, so this is simply "what should be sounding right now".
+    const auto resolution = noteStack.getCurrentResolution (priorityMode);
+
+    if (! resolution.isSounding)
+    {
+        // Nothing is held. Leave the voice silent - the other side already
+        // closed its gate.
+        voiceIsSounding = false;
+        return;
+    }
+
+    // noteOn, not retargetPitch: the voice is silent by the hand-over
+    // invariant, so this is a fresh trigger and must pluck.
+    voice.noteOn (resolution.pitchLog2Hz, resolution.velocity);
+    voiceIsSounding = true;
+    soundingNoteNumber = resolution.noteNumber;
+}
+
+void NoteRouter::dispatchPendingEvents (SynthVoice& voice, NotePriorityMode priorityMode,
+                                         VoiceDrive drive) noexcept
 {
     NoteEvent event;
 
@@ -18,18 +52,28 @@ void NoteRouter::dispatchPendingEvents (SynthVoice& voice, NotePriorityMode prio
     // not. At block granularity that's inaudible, but it is a real limitation
     // rather than an oversight.
     while (midiEvents.pop (event))
-        apply (event, voice, priorityMode);
+        apply (event, voice, priorityMode, drive);
 
     while (uiEvents.pop (event))
-        apply (event, voice, priorityMode);
+        apply (event, voice, priorityMode, drive);
 }
 
-void NoteRouter::apply (const NoteEvent& event, SynthVoice& voice, NotePriorityMode priorityMode) noexcept
+void NoteRouter::apply (const NoteEvent& event, SynthVoice& voice, NotePriorityMode priorityMode,
+                         VoiceDrive drive) noexcept
 {
+    // The stack is updated in BOTH drive modes - see the comment on
+    // VoiceDrive. Only the voice calls and the sounding-note belief below are
+    // conditional, so those two fields are written by exactly one owner at a
+    // time.
+    const auto driveVoice = drive == VoiceDrive::Direct;
+
     if (event.type == NoteEvent::Type::NoteOn)
     {
         const auto resolution = noteStack.noteOn (event.noteNumber, event.pitchLog2Hz,
                                                    event.velocity, priorityMode);
+
+        if (! driveVoice)
+            return;
 
         // A note-on that doesn't change which note is sounding must NOT reach
         // the voice, or Retrigger mode would re-pluck for no audible reason.
@@ -48,6 +92,9 @@ void NoteRouter::apply (const NoteEvent& event, SynthVoice& voice, NotePriorityM
     else
     {
         const auto resolution = noteStack.noteOff (event.noteNumber, priorityMode);
+
+        if (! driveVoice)
+            return;
 
         if (resolution.isSounding)
         {

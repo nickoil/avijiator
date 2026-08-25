@@ -6,6 +6,9 @@ no Visual Studio IDE); **Projucer → Gradle**, built/run from VS Code's
 terminal, for the Android port stage (Android Studio kept only as a debugger
 fallback, not the daily driver).
 
+See also [future-work.md](future-work.md) for larger ideas that aren't scoped
+into a numbered item yet (VST3 conversion, a drum voice).
+
 ## 0. Tooling setup
 
 - [x] Install VS Code extensions: C/C++ (ms-vscode.cpptools), CMake Tools
@@ -69,8 +72,28 @@ Build/validate everything here before touching Android.
       (b) The **last-note vs. highest-note** open decision is deliberately
       *not* settled — it's a live combo box so it can be chosen by ear, per
       architecture.md. Still open there.
-- [ ] **5. Arpeggiator** — pattern modes (up/down/up-down/random/as-played),
-      sample-accurate clock (not `Timer`-based), rate control
+- [x] **5. Arpeggiator** — pattern modes (up/down/up-down/random/as-played),
+      sample-accurate clock (not `Timer`-based), rate control.
+      Design + build order: [arpeggiator-design.md](arpeggiator-design.md).
+      Builds clean (Debug + Release, zero warnings), all 7 steps done. Drift-free
+      `StepClock`, comparison-key pattern walker (survives a changing held set
+      with no index to clamp), a two-deadline sub-block render loop, and a
+      hold/latch rule that unions mid-phrase and replaces on a fresh chord.
+      Section 7's T1–T10 transition table is now `runArpTransitionSelfTest`,
+      driving real blocks through a shared `renderVoiceBlock` rather than a
+      re-implementation of the hand-over; it found and fixed two real defects
+      (a latched chord surviving arp-off; a step reopening a note on top of an
+      already-open gate after a tempo jump) plus a 250-round deterministic
+      stuck-note fuzz. Six Debug self-tests total.
+      **Two caveats, neither resolved:**
+      (a) **Self-test pass/fail is only trustworthy under a debugger (F5)** —
+      `jassert` doesn't halt a plain launch, so "it launched and stayed up" is
+      not evidence. Affects all six tests, not just the arp's; not yet fixed to
+      report headlessly.
+      (b) **Untested end-to-end with MIDI hardware and unverified by ear** — the
+      listening tests in arpeggiator-design.md section 12 (division timing,
+      up-down endpoints, hold rule "feel", whether it's in the SH-101 family)
+      are the user's to run.
 - [ ] **6. UI pass** — knobs/controls for what's built so far, mouse-driven;
       keep touch-first layout decisions in mind even though untested. Consider
       a Claude Design canvas mockup first to iterate on SH-101 panel layout
@@ -114,6 +137,25 @@ Build/validate everything here before touching Android.
       carries DC of `2w-1`; real hardware AC-couples it away. Harmless with a
       static pulse width, but **needed before item 3 sweeps PWM with the
       LFO**, or the moving DC thumps
+
+### App housekeeping (not numbered — no reordering)
+
+- [ ] **Remember audio/MIDI device settings across restarts** — currently
+      `setAudioChannels(0, 2)` picks a default device on every launch (Windows
+      falls back to WASAPI unless ASIO is re-selected by hand each time), and
+      `enableAllMidiInputs()` just re-enables whatever's currently plugged in
+      rather than recalling what was on last time. Nothing is persisted at
+      all today — confirmed by grep, zero hits for `createStateXml`,
+      `ApplicationProperties`, `PropertiesFile` anywhere in `Source/`.
+      Fix is standard JUCE, not novel: `AudioDeviceManager::createStateXml()`
+      to save, `initialise (ins, outs, savedXml, true)` to restore (replacing
+      the convenience `setAudioChannels` call), stored via
+      `juce::ApplicationProperties`. Load in `MainComponent`'s constructor,
+      save in its destructor or `AvijiatorApplication::shutdown()`.
+      Message-thread/startup-time only — no audio-thread or DSP involvement,
+      doesn't block or depend on any numbered item above. Also: link
+      `juce_data_structures` explicitly in `CMakeLists.txt` (currently only
+      pulled in transitively via `juce_gui_extra`)
 
 ## 2. Stage B — Android (port)
 

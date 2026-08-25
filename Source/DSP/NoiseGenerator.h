@@ -22,16 +22,30 @@ public:
 
     void reset() noexcept { state = initialSeed; }
 
-    float processSample() noexcept
+    // One raw step of the generator.
+    //
+    // Split out of processSample() so the arpeggiator's Random pattern can
+    // reuse this without pulling a float through an int conversion - see
+    // documents/arpeggiator-design.md section 4. The split is
+    // BEHAVIOUR-IDENTICAL: same state advance, same order, so the audible
+    // noise source's sequence has not moved and the existing A/B baseline is
+    // unchanged. Worth stating, because "the noise sounds different now"
+    // would be a nasty surprise from what looks like a pure refactor.
+    std::uint32_t nextUInt32() noexcept
     {
         // xorshift32, Marsaglia's constants.
         state ^= state << 13;
         state ^= state >> 17;
         state ^= state << 5;
 
+        return state;
+    }
+
+    float processSample() noexcept
+    {
         // Top 24 bits mapped to [-1, 1). The high bits are used rather than
         // the low ones because xorshift's low bits are the weaker of the two.
-        return (float) (std::int32_t) (state >> 8) * (1.0f / 8388608.0f) - 1.0f;
+        return (float) (std::int32_t) (nextUInt32() >> 8) * (1.0f / 8388608.0f) - 1.0f;
     }
 
 private:
