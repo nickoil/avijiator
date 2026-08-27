@@ -10,6 +10,7 @@
 #include "DSP/SynthVoice.h"
 #include "NoteRouter.h"
 #include "QwertyNoteInput.h"
+#include "StepSequencer.h"
 #include "UI/SynthPanel.h"
 
 //==============================================================================
@@ -103,11 +104,22 @@ private:
     // 4's.
     Arpeggiator arp;
 
-    // AUDIO-THREAD-PRIVATE. Edge-detects the arpEnabled atomic, because
-    // switching the arp on or off is a HAND-OVER of the voice between two
-    // owners, and both sides have to be told - see
-    // documents/arpeggiator-design.md section 7.
-    bool arpWasOn = false;
+    // A second peer, exactly like arp: owns its OWN step clock, gate and
+    // pattern-index arithmetic, and decides WHICH note happens WHEN from
+    // VoiceParameters' pattern storage. Item 7 build step 4
+    // (documents/step-sequencer-design.md section 6) wires this into the
+    // real 3-way hand-over below - arp and sequencer are a mutually exclusive
+    // note source, never both driving at once.
+    StepSequencer sequencer;
+
+    // AUDIO-THREAD-PRIVATE. Edge-detects arpEnabled/seqEnabled together, since
+    // switching either on or off is a HAND-OVER of the voice between three
+    // possible owners and all three sides have to be told - see
+    // documents/arpeggiator-design.md section 7 and
+    // documents/step-sequencer-design.md sections 6 and 7. Replaced the
+    // original two-way arpWasOn bool when item 7 build step 4 added the
+    // sequencer as a third owner.
+    VoiceOwner voiceOwner = VoiceOwner::Keys;
 
     // The real instrument panel, at its fixed design size - see
     // documents/ui-design.md sections 3 and 5. Declared after voice and

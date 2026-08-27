@@ -125,14 +125,181 @@ Build/validate everything here before touching Android.
       architecture.md) are actually big enough to hit on a phone — no touch
       hardware exists in Stage A, real answer is Stage B item 9; whether the
       arrangement reads as being in the SH-101 family.
-- [ ] **7. Step sequencer (phase 2)** — 16-step (page-able) pattern, per-step
-      pitch/gate/accent/slide, shared clock/trigger plumbing with the arp.
-      **Future consideration, not yet scoped into this item**: per-step
-      parameter automation ("p-locks") beyond pitch/gate/accent/slide —
-      full design in [step-automation.md](step-automation.md). That doc
-      flags itself as plausibly a bigger build than the synth voice, so
-      treat it as something to look at when item 7 is underway, not a
-      commitment yet
+- [ ] **7. Step sequencer (phase 2)** — 16-step pattern, per-step
+      pitch/gate/accent/slide plus two per-step filter lanes (cutoff,
+      resonance), shared clock/trigger plumbing with the arp.
+      Design + build order: [step-sequencer-design.md](step-sequencer-design.md).
+      **Step 0 (design) done. Step 1 (clock + pattern storage) done:**
+      `StepSequencer` class (`Source/StepSequencer.h/.cpp`) owning its own
+      `StepClock` and the `stepIndex % patternLength` arithmetic, plus the
+      six per-step `VoiceParameters` arrays (pitch/gate/accent/slide + both
+      filter lanes) and five scalar atomics (`seqEnabled`, `seqDivision`,
+      `seqPatternLength`, `seqTempoBpm`, `seqGateLength`). `runStepSequencerPatternSelfTest`
+      checks storage read/write by index with no cross-array aliasing, the
+      pattern-index wrap (including a defensively clamped out-of-range
+      length), and rest-handling defaults.
+      **Step 2 (render loop) done:** `StepSequencer::process()` — the
+      two-deadline sub-block loop, copied (not shared) from
+      `Arpeggiator::process`'s shape per `StepClock.h`'s own comment on when
+      that becomes worth doing. Rest handling (advances the clock without
+      gating), slide via the arp's Tie idea (skip the force-close so
+      `SynthVoice` takes its legato branch), accent hardcoded to a fixed
+      elevated velocity (1.0 vs. 0.75 — depth routing is step 3), and both
+      filter lanes read every step boundary but not yet summed into any DSP
+      (step 5's job). Builds clean (Debug + Release, zero warnings).
+      `runStepSequencerRenderSelfTest` drives a real `SynthVoice` through a
+      fixed test pattern and checks actual rendered output (peak amplitude
+      and, for the inert lanes, byte-identical buffers) rather than
+      re-implementing the loop it's checking — same approach as
+      `runArpTransitionSelfTest`. Covers: an all-rest pattern stays silent
+      exactly (not approximately); the clock keeps grid phase through rests
+      (`stepIndex` advances even with nothing gated); a single gated step
+      among rests audibly sounds and then settles back to true silence
+      before the pattern wraps; cutoff/resonance are proven inert (identical
+      output at 0 vs. 1 — this test is *meant* to start failing once step 5
+      wires them in); accent is likewise proven inert at the time this test
+      was written (velocity wasn't routed anywhere yet); and slide is proven
+      to take the legato branch rather than force-closing, exercised via a
+      deliberate mid-gate tempo drop — the one scenario (documented in
+      `arpeggiator-design.md` section 3) where "skip the force-close" is
+      actually observable under the gate-fraction clamp's arithmetic.
+      **Not yet reachable from the real app** — no `StepSequencer` member on
+      `MainComponent`, no audio-path change, nothing playable by ear yet.
+      That hand-over (3-way arp/seq/keys arbitration) is step 4, built once
+      as the real thing rather than a throwaway stand-in now — see the
+      design doc section 6. Verified 2026-08-27 via `cdb.exe` (see
+      [cdb-headless-assertion-check memory] — installed later the same
+      session): a full run fired no assertion from any step-sequencer or
+      arp/note-router code, only the unrelated pre-existing font bug below.
+      **Step 3 (accent DSP) done:** two new `VoiceParameters` atomics,
+      `velocityToAmpDepth` (0..1, multiplicative) and
+      `velocityToCutoffDepthOctaves` (octaves, additive, reference point
+      velocity == 1.0), both defaulting to 0 (inert). Wired into
+      `SynthVoice.cpp`'s amp and cutoff summing points — `currentVelocity`,
+      captured since item 4 and never used, now actually reaches audio.
+      Because the new depths default to 0, build step 2's "accent proven
+      inert" self-test above **still passes** rather than starting to fail
+      as that comment predicted when it was written — accent isn't inert
+      because it's unwired any more, it's inert because nobody has turned
+      either knob up yet, same as every other modulation depth in this
+      codebase (`envToCutoffDepthOctaves`, `lfoToPitchDepthOctaves`, ...).
+      **No panel knob yet, by deliberate choice, not an oversight**: exposing
+      one means adding cells to `SynthPanel.cpp`'s VCF/ENV sections, and row
+      B's own comment there states its four sections' widths already fill
+      the panel's 1240px budget exactly — adding cells means rebalancing
+      that budget (`envRowWidthCompensation` and friends), which is real
+      layout surgery on an already-shipped (item 6), already-tuned screen.
+      That's what design doc build step 6 ("UI wiring... resize if needed")
+      is explicitly scoped for, so it's deferred there rather than done as a
+      side effect of a DSP step. Until then the new depths are reachable only
+      by hand-editing their atomic defaults or through
+      `runAccentDepthSelfTest` (`Source/DSP/SynthVoice.h/.cpp`) — **not yet
+      audible by ear from the running app**, so "accent audibly punches
+      harder" (this build step's design-doc target) is proven in the self-
+      test's numeric sense (an accented note's amp/cutoff terms measurably
+      differ from a normal one once a depth is turned up) but not yet
+      confirmable by a human at the speakers. Builds clean (Debug + Release,
+      zero warnings); verified same session via `cdb.exe` — no assertion
+      fired from `runAccentDepthSelfTest` or anything else, only the
+      unrelated font bug below.
+      **Step 4 (hand-over / transitions) done:** `renderVoiceBlock`
+      (`Source/Arpeggiator.h/.cpp`) extended from the two-way `arpWasOn bool`
+      to a real three-way arbitration — a new `VoiceOwner { Keys, Arp, Seq }`
+      enum, computed each block from `arpEnabled`/`seqEnabled` (seq wins an
+      arbitrary, documented tie-break if a bug ever left both on at once; the
+      real toggle UI, step 6, is never meant to produce that state). On any
+      change of owner, `router.releaseVoice`/`arp.releaseVoice`/
+      `seq.releaseVoice` are now *all three* called unconditionally — each
+      already idempotent, so exactly one ever does anything, same invariant
+      that already made a stuck note unreachable in the two-way case.
+      `StepSequencer::releaseVoice` is new (`Source/StepSequencer.h/.cpp`),
+      mirroring `Arpeggiator::releaseVoice`'s shape: force-close an open gate,
+      park the clock on a boundary. Deliberately **no** `StepSequencer::retakeVoice`
+      despite the design doc naming one — `Arpeggiator` never needed one
+      either, for the same reason: a parked clock already fires its first
+      step at once on the very next `process()` call, so only `NoteRouter`
+      (which isn't self-clocking) needs an explicit "sound it again now."
+      `MainComponent` gained a `StepSequencer sequencer` member and swapped
+      `arpWasOn` for `voiceOwner`; `prepareToPlay`/`releaseResources` now
+      prepare/reset the sequencer alongside the arp (S8/S9). Walked the design
+      doc's S1-S12: S1-S4 needed and got a new self-test
+      (`runSeqTransitionSelfTest`, `Source/StepSequencer.h/.cpp`) since they
+      exercise the new arbitration code directly; S6/S7 need no new code
+      (`process()` already reads pattern data fresh at every step boundary,
+      so a mid-run length change or a live edit was already correct with zero
+      changes here); S10 stays documented-not-coded; S11/S12 are already
+      covered by existing self-tests or are simply never reached (Hold is
+      never read while the seq drives). `runSeqTransitionSelfTest` drives
+      real blocks through the real `renderVoiceBlock` — voice, router, arp
+      and seq all real, nothing re-implemented — same "output is the only
+      thing that proves it" approach as `runArpTransitionSelfTest`, which was
+      itself extended (three-way `TransitionRig`) to keep exercising the
+      arp↔keys seam through the new signature. Builds clean (Debug + Release,
+      zero warnings); verified via `cdb.exe` — no assertion fired from either
+      transition self-test or anything else, only the unrelated font bug
+      below. **First build step where the sequencer is reachable from the
+      real app** — flipping `seqEnabled` now actually plays the pattern
+      through `MainComponent::getNextAudioBlock`, though there is still no UI
+      toggle for it (step 6) or filter-lane DSP (step 5), so this remains
+      confirmable only by hand-editing the atomic or through the self-test,
+      not yet by ear from the panel.
+      **Step 5 (filter automation lanes) done:** resolved section 5's open
+      question — resonance gets a **simple additive 0..1 offset, clamped
+      post-sum** rather than cutoff's octave-style shape, chosen because it
+      keeps 0 exactly inert without redefining `stepResonanceNorm`'s own
+      zero default, needs no new depth knob, and matches stability
+      requirements (`Vcf::processSample`'s feedback solution assumes
+      resonance in `[0,1]`). Cutoff's lane reuses the existing
+      `cutoffModulationOctaves` sum as a fourth additive term, scaled by a
+      new **fixed** constant (`SynthVoice::seqCutoffModRangeOctaves = 4.0f`,
+      not a user knob) so 0 stays exactly 0 octaves — a one-directional
+      lift, not centred on a midpoint, so an unedited lane never shifts the
+      sound. **New transport mechanism**, not a `VoiceParameters` atomic:
+      `SynthVoice::setStepFilterModulation(cutoffNorm, resonanceNorm)`,
+      called by `StepSequencer::process()` at every step boundary
+      (independent of gate state) exactly where step 2 left a
+      read-and-discard. Deliberately bypasses the atomic-polling
+      `apply()`/`lastXxx` pattern every other smoothed parameter uses —
+      pushes straight into each value's own smoother's `setTargetValue`,
+      since the caller already knows exactly *when* a value changes (a step
+      boundary), unlike a UI knob's atomic that gets polled every block
+      regardless. Follows the `currentVelocity` precedent (audio-thread
+      working state passed as a method argument, not a UI-settable
+      parameter) rather than adding new `VoiceParameters` fields that only
+      the audio thread would ever write. Both lanes smoothed at their own
+      point of use (`SynthVoice::rampSeconds` for cutoff,
+      `resonanceRampSeconds` for resonance — the slower one, since a
+      resonance jump thumps the feedback loop the same way a knob jump
+      does), never a raw snap, satisfying CLAUDE.md's zipper-noise
+      constraint at 16th-note rates. `SynthVoice::reset()` now also zeroes
+      both smoothers, mirroring `currentVelocity`'s own reset, so a device
+      stop can't leave a stale filter-lane modulation hanging (S8).
+      `runFilterAutomationSelfTest` (`Source/DSP/SynthVoice.h/.cpp`) proves
+      the summing formulas in isolation — untouched vs. explicit (0,0) is
+      byte-identical (exact: `0 * range` and `+ 0.0f` are both exact in
+      IEEE754), each lane turned up individually is provably *not*
+      byte-identical against the (0,0) baseline. `runStepSequencerRenderSelfTest`'s
+      existing cutoff/resonance-lane block — byte-identical when written at
+      step 2, with its own comment predicting step 5 would flip it — is now
+      flipped to the opposite assertion, exactly as predicted, proving the
+      *integration* (that `process()` actually calls the setter with real
+      per-step values, not just that the formula is correct alone). Builds
+      clean (Debug + Release, zero warnings); verified via `cdb.exe` — no
+      assertion fired from either self-test or anything else, only the
+      unrelated font bug below. **Not yet audible by ear from the running
+      app**, same caveat as step 3 and for the same reason: no UI knob or
+      pattern editor exists yet (step 6), so the only way to see either lane
+      move today is through the self-tests or by hand-editing
+      `stepCutoffNorm`/`stepResonanceNorm`. **Not yet tuned by ear either**:
+      `seqCutoffModRangeOctaves = 4.0f` is a placed-not-measured starting
+      guess (CLAUDE.md's "what you cannot verify") — easy to retune once
+      step 6 gives it a knob to feel through. Build steps 6-8 not started.
+      **Future consideration, not yet scoped into this item**: *generalised*
+      per-step parameter automation ("p-locks") for arbitrary parameters
+      beyond pitch/gate/accent/slide/cutoff/resonance — full design in
+      [step-automation.md](step-automation.md). That doc flags itself as
+      plausibly a bigger build than the synth voice, so treat it as
+      something to look at once item 7 is built, not a commitment yet
 - [ ] **8. Character & "Vim"** — analogue realism + performance-feel layer on
       top of the clean core voice: filter feedback saturation, exponential
       envelope curves, oscillator drift, output noise floor/saturation,
@@ -143,19 +310,20 @@ Build/validate everything here before touching Android.
       existing. Gated behind one global VIM switch plus per-feature controls,
       so a clean/clinical mode stays reachable for A/B. Full spec, control
       tiering, and priority order (highest-impact first):
-      [character-and-vim.md](character-and-vim.md)
+      [character-and-vim.md](character-and-vim.md). **Filter drive /
+      saturation** (a driven stage to colour the sound at all levels, folded
+      in from the former "Voice follow-ups" list) belongs here too — **the
+      first thing to try if the filter lacks character**, before considering
+      a ladder rewrite. Item 2 ships a vanilla signal at normal settings so
+      the SH-101 A/B tests one variable at a time; the topology is built to
+      take this as a small change. **Not the same thing** as the `softClip`
+      already in `Vcf.cpp` — that one only engages when resonance pushes the
+      feedback loop past self-oscillation, and exists so the filter doesn't
+      diverge to NaN, not for flavour. See documents/dsp-voice-design.md
+      section 3
 
 ### Voice follow-ups (deferred out of item 2, not numbered — no reordering)
 
-- [ ] **Filter drive / saturation** — a driven stage to colour the sound at
-      all levels, for character. Item 2 ships a vanilla signal at normal
-      settings so the SH-101 A/B tests one variable at a time; the topology
-      is built to take this as a small change. **This is the first thing to
-      try if the filter lacks character** — before considering a ladder
-      rewrite. **Not the same thing** as the `softClip` already in `Vcf.cpp`
-      — that one only engages when resonance pushes the feedback loop past
-      self-oscillation, and exists so the filter doesn't diverge to NaN, not
-      for flavour. See documents/dsp-voice-design.md section 3
 - [ ] **DC blocker after the mixer** — one-pole highpass. A pulse of duty `w`
       carries DC of `2w-1`; real hardware AC-couples it away. Harmless with a
       static pulse width, but **needed before item 3 sweeps PWM with the
@@ -238,6 +406,23 @@ Build/validate everything here before touching Android.
 
 ### App housekeeping (not numbered — no reordering)
 
+- [ ] **Fix silent font-loading failure** — `PanelLookAndFeel::regularTypeface()`
+      / `semiBoldTypeface()` (`Source/UI/PanelLookAndFeel.cpp:19-28`) call
+      `juce::Typeface::createSystemTypefaceFor(...)` and pass the result
+      straight into `.withTypeface(...)` (`PanelLookAndFeel.cpp:39`) with no
+      null check. Found 2026-08-27 via a CLI debugger (`cdb.exe`, installed
+      this session specifically to verify Debug self-tests headlessly —
+      `jassert` only breaks with a debugger attached, and a plain launch had
+      never been able to catch this): JUCE's own assertion at
+      `fonts/juce_FontOptions.h:138` fires on **every repaint** (~250 times
+      in a 20-second run), meaning `createSystemTypefaceFor` has been
+      returning null since item 6 shipped. Nothing crashes because JUCE
+      falls back to a default system font silently — so the panel has
+      likely been rendering with the wrong typeface (not the embedded
+      `AvijiatorFonts` one) with no visible symptom. Likely cause: a
+      BinaryData reference or embedded font resource mismatch in
+      `AvijiatorFonts`, not yet investigated further — out of scope for
+      whichever numbered item is active when this is picked up
 - [ ] **Remember audio/MIDI device settings across restarts** — currently
       `setAudioChannels(0, 2)` picks a default device on every launch (Windows
       falls back to WASAPI unless ASIO is re-selected by hand each time), and

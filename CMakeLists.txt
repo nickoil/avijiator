@@ -43,6 +43,7 @@ target_sources(Avijiator
         Source/Main.cpp
         Source/MainComponent.cpp
         Source/Arpeggiator.cpp
+        Source/StepSequencer.cpp
         Source/NoteRouter.cpp
         Source/QwertyNoteInput.cpp
         Source/DSP/PolyBlepOscillator.cpp

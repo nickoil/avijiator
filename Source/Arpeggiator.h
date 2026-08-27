@@ -12,6 +12,7 @@
 
 class NoteRouter;
 class SynthVoice;
+class StepSequencer;
 
 //==============================================================================
 /*
@@ -282,27 +283,41 @@ private:
 
 //==============================================================================
 /*
-    ONE BLOCK of the note-input -> voice path: the arp/router hand-over, the
+    Which of the three note sources currently owns the voice's pitch/gate.
+    Item 7 build step 4 (documents/step-sequencer-design.md sections 6 and 7)
+    extends the arp's original two-way hand-over (a plain arpWasOn bool) to
+    this three-way one - raw keys, the arp, or the step sequencer, arp and
+    seq being a mutually exclusive note source per that document's section 1.
+*/
+enum class VoiceOwner : int { Keys = 0, Arp, Seq };
+
+/*
+    ONE BLOCK of the note-input -> voice path: the keys/arp/seq hand-over, the
     event drain, and the render - everything MainComponent::getNextAudioBlock
     does apart from the AudioBuffer plumbing and the mono fan-out.
 
     A free function rather than lines inside getNextAudioBlock purely so the
-    transition self-test can drive the REAL hand-over instead of a copy of it.
-    A test that re-implements the logic it is checking proves nothing, and the
-    hand-over is precisely where a stuck note comes from - see
-    documents/arpeggiator-design.md section 7. Ownership is unchanged:
-    MainComponent still owns the voice, the router, the arp and arpWasOn, and
-    passes them in.
+    transition self-tests can drive the REAL hand-over instead of a copy of
+    it. A test that re-implements the logic it is checking proves nothing,
+    and the hand-over is precisely where a stuck note comes from - see
+    documents/arpeggiator-design.md section 7 and
+    documents/step-sequencer-design.md section 7. Ownership is unchanged:
+    MainComponent still owns the voice, the router, the arp, the sequencer and
+    currentOwner, and passes them in.
 
-    `arpWasOn` is IN/OUT: it is the edge-detect state for the arpEnabled atomic,
-    audio-thread-private, and belongs to whoever is calling blocks in sequence.
+    `currentOwner` is IN/OUT: it is the edge-detect state that used to be the
+    bare arpWasOn bool, audio-thread-private, and belongs to whoever is
+    calling blocks in sequence. Seq wins an arbitrary but deterministic
+    tie-break if both arpEnabled and seqEnabled are ever seen on at once (not
+    a case the real toggle UI, build step 6, is meant to produce) - see the
+    definition.
 
     Writes into output, does not add to it.
 
     AUDIO THREAD.
 */
-void renderVoiceBlock (SynthVoice& voice, NoteRouter& router, Arpeggiator& arp,
-                        bool& arpWasOn, float* output, int numSamples) noexcept;
+void renderVoiceBlock (SynthVoice& voice, NoteRouter& router, Arpeggiator& arp, StepSequencer& seq,
+                        VoiceOwner& currentOwner, float* output, int numSamples) noexcept;
 
 //==============================================================================
 #if JUCE_DEBUG

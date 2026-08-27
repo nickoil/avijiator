@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 
 #include "Lfo.h"
@@ -11,6 +12,12 @@
 // note above the item 5 block below. No cycle: Arpeggiator.h forward-declares
 // SynthVoice and includes nothing from here.
 #include "../Arpeggiator.h"
+
+// For seqMaxSteps, sizing the pattern-storage arrays below. Same "wrong
+// direction, no cycle" situation as the Arpeggiator include just above:
+// StepSequencer is a peer class too, and StepSequencer.h includes nothing
+// from here.
+#include "../StepSequencer.h"
 
 //==============================================================================
 /*
@@ -114,6 +121,36 @@ struct VoiceParameters
     std::atomic<float> lfoToPitchDepthOctaves { 0.0f };
     std::atomic<float> lfoToCutoffDepthOctaves { 0.0f };
 
+    // Item 7, build step 3 (accent DSP). currentVelocity has been captured
+    // since item 4 but never routed - SynthVoice.cpp:183-188 and
+    // SynthVoice.h's own comment on that field already named these two as
+    // its eventual landing points. Both default to 0 (inert): a patch that
+    // never touches them renders byte-identically to before this step, the
+    // same guarantee envToCutoffDepthOctaves/lfoTo*DepthOctaves above give -
+    // see documents/step-sequencer-design.md section 12. Not yet reachable
+    // from the panel - the UI knob is step 6's job, since exposing it means
+    // rebalancing the fixed-width row SynthPanel.cpp's resized() already
+    // fills exactly (see that file's row-B comment); until then these are
+    // set only by runAccentDepthSelfTest and, eventually, by hand.
+
+    // 0..1, not octaves - multiplicative, same units as the summing point it
+    // feeds (SynthVoice.cpp's amplitudeModulation, itself multiplicative and
+    // unity-defaulted). 0 = no velocity sensitivity, every note-on plays at
+    // full amplitude regardless of velocity; 1 = amplitude tracks velocity
+    // exactly. Smoothed - a depth change is a step change in gain otherwise.
+    std::atomic<float> velocityToAmpDepth { 0.0f };
+
+    // Octaves, additive into the existing cutoffModulationOctaves sum
+    // (SynthVoice.cpp:214-218) - same units as envToCutoffDepthOctaves/
+    // lfoToCutoffDepthOctaves just above, for the same reason: a modulator
+    // that shifts cutoff by a fixed number of Hz sounds different at 200 Hz
+    // than at 5 kHz. Reference point is velocity == 1.0 (no shift) - every
+    // note source that doesn't vary velocity (QWERTY, the arp, a full-
+    // velocity MIDI note, a sequencer step's own accent) already plays at
+    // exactly 1.0, so only a velocity BELOW that - a normal, un-accented
+    // sequencer step, or a soft MIDI note-on - pulls the cutoff down.
+    std::atomic<float> velocityToCutoffDepthOctaves { 0.0f };
+
     //==============================================================================
     // Item 4 (note handling).
 
@@ -166,6 +203,89 @@ struct VoiceParameters
     // unsmoothed. Clamped to 0.05-0.95 by the arpeggiator: 100% is not "a
     // longer gate" but a different feature - see section 10.
     std::atomic<float> arpGateLength { 0.5f };
+
+    //==============================================================================
+    // Item 7 (step sequencer).
+    //
+    // Peer class parameters, same reasoning as item 5's block above: the step
+    // sequencer is a peer class owned by MainComponent, not part of the
+    // voice, but shares this one UI -> audio channel.
+    //
+    // Struct-of-arrays, not the member-pointer spec shape items 2-6 used
+    // everywhere else: ParameterControls.h's KnobSpec/ChoiceSpec/ToggleSpec
+    // are all "one pointer-to-member per control" and cannot address "array +
+    // index" - a new index-based attach helper is build step 6, not this
+    // one. See documents/step-sequencer-design.md sections 1 and 4.
+    //
+    // Read by index at each step boundary, one read per field per step. A
+    // torn read across fields is harmless - the whole step is consumed
+    // together at one instant - same "raw atomics, no smoothing at the point
+    // of read" convention as arpTempoBpm/arpGateLength above.
+
+    // Log2(Hz), same convention as pitch everywhere else in this file - so a
+    // step's pitch sums in octaves with everything else already built that
+    // way.
+    std::array<std::atomic<float>, seqMaxSteps> stepPitchLog2Hz {};
+
+    // 0 = rest, 1 = gate on. int, not bool: std::atomic<bool> is not
+    // guaranteed lock-free on every platform, and every other discrete
+    // switch in this struct (envelopeDestination, lfoWaveform, ...) already
+    // uses int for exactly that reason.
+    std::array<std::atomic<int>, seqMaxSteps> stepGateOn {};
+
+    // Realized as velocity into SynthVoice, not a separate depth path -
+    // SynthVoice.cpp:183-188 and SynthVoice.h:82-86 already name this as
+    // accent's landing point. Build step 3 wires it in; step 1 only owns the
+    // storage.
+    std::array<std::atomic<int>, seqMaxSteps> stepAccent {};
+
+    // The arp's "Tie" idea, reused verbatim: skip force-closing the gate
+    // across this step's boundary so SynthVoice takes its legato branch and
+    // glides instead of re-triggering. See arpeggiator-design.md section 10;
+    // build step 2 is what actually reads this.
+    std::array<std::atomic<int>, seqMaxSteps> stepSlide {};
+
+    // Additive term into SynthVoice's existing cutoffModulationOctaves sum,
+    // via SynthVoice::setStepFilterModulation - StepSequencer::process calls
+    // it once per step boundary, independent of gate state (build step 5).
+    // 0 maps to exactly 0 octaves (inert, matching this array's own zero
+    // default); 1 maps to +SynthVoice::seqCutoffModRangeOctaves, a one-
+    // directional lift rather than a range centred on some midpoint, chosen
+    // so an unedited lane never shifts the sound. Smoothed at the point of
+    // use inside SynthVoice, never a raw snap, same as every other
+    // continuous modulation depth here: a snapped value at 16th-note rates
+    // would be far more audible than an occasional knob turn.
+    std::array<std::atomic<float>, seqMaxSteps> stepCutoffNorm {};
+
+    // Feeds SynthVoice's resonance modulation summing point - added straight
+    // onto the resonance knob's own value, then clamped to [0,1] before
+    // reaching Vcf::processSample (build step 5). Section 5's open question
+    // is resolved this way: resonance is already a normalised 0..1 quantity,
+    // so a simple additive offset was chosen over forcing cutoff's
+    // octave-style shape onto it - the sequencer is the first-ever consumer
+    // of resonance modulation in this instrument. Smoothed at the point of
+    // use, same reasoning as stepCutoffNorm above - a resonance jump thumps
+    // the whole feedback loop at once, same reason the knob itself ramps
+    // slower than everything else (SynthVoice::resonanceRampSeconds).
+    std::array<std::atomic<float>, seqMaxSteps> stepResonanceNorm {};
+
+    // Discrete switch, raw per block - matches arpEnabled's treatment. Off on
+    // first load, same reasoning: the instrument must not start sequencing
+    // notes nobody programmed.
+    std::atomic<int> seqEnabled { 0 };
+    std::atomic<int> seqDivision { (int) StepDivision::Sixteenth };
+    std::atomic<int> seqPatternLength { seqMaxSteps };
+
+    // A TIME CONSTANT, raw per block - same reasoning as arpTempoBpm. A
+    // deliberately SEPARATE atomic, not shared with the arp: mirrors
+    // StepClock's own "own instance per owner" precedent (section 1's
+    // decision table). A shared master tempo stays TODO.md's separate
+    // "Tempo sync" item.
+    std::atomic<float> seqTempoBpm { 120.0f };
+
+    // A FRACTION of the step, same reasoning and same clamp range as
+    // arpGateLength.
+    std::atomic<float> seqGateLength { 0.5f };
 
     static_assert (std::atomic<float>::is_always_lock_free,
                    "Parameter stores must not take a lock on the message thread "

@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "NoteRouter.h"
+#include "StepSequencer.h"
 #include "DSP/SynthVoice.h"
 
 namespace
@@ -552,8 +553,8 @@ int Arpeggiator::chooseRandomIndex (HeldNotes active, int excludeNoteNumber) noe
 }
 
 //==============================================================================
-void renderVoiceBlock (SynthVoice& voice, NoteRouter& router, Arpeggiator& arp,
-                        bool& arpWasOn, float* output, int numSamples) noexcept
+void renderVoiceBlock (SynthVoice& voice, NoteRouter& router, Arpeggiator& arp, StepSequencer& seq,
+                        VoiceOwner& currentOwner, float* output, int numSamples) noexcept
 {
     const auto& parameters = voice.getParameters();
 
@@ -561,55 +562,84 @@ void renderVoiceBlock (SynthVoice& voice, NoteRouter& router, Arpeggiator& arp,
         parameters.notePriorityMode.load (std::memory_order_relaxed);
 
     const auto arpIsOn = parameters.arpEnabled.load (std::memory_order_relaxed) != 0;
+    const auto seqIsOn = parameters.seqEnabled.load (std::memory_order_relaxed) != 0;
 
-    // THE HAND-OVER. Switching the arp on or off moves ownership of the one
-    // voice between the router and the arpeggiator, and the side that stops
+    // Arp and seq are a mutually exclusive NOTE source
+    // (documents/step-sequencer-design.md section 1) - seq wins the tie if a
+    // UI bug or a test ever leaves both atomics on at once. Arbitrary but
+    // deterministic, and easy to flip; the real toggle UI (build step 6) is
+    // not meant to be able to produce this state in the first place.
+    const auto desiredOwner = seqIsOn ? VoiceOwner::Seq
+                             : arpIsOn ? VoiceOwner::Arp
+                                       : VoiceOwner::Keys;
+
+    // THE HAND-OVER. Switching owners moves ownership of the one voice between
+    // the router, the arpeggiator and the sequencer, and the side that stops
     // driving has to leave it silent - otherwise a sustained note keeps
     // sounding with no note-off pending (stuck on), or the router's belief goes
-    // stale and a later arp-OFF leaves silence with a key still held (stuck
-    // off, T1). Both are as bad as each other.
+    // stale and a later hand-back leaves silence with a key still held (stuck
+    // off, T1/S3). All are as bad as each other.
     //
-    // BOTH releases are called on EVERY transition, in either direction. Each
-    // is idempotent, so exactly one of them actually does anything - which is
-    // what makes a stuck note unreachable by any toggle order, rather than
-    // merely unlikely. See documents/arpeggiator-design.md sections 6 and 7.
-    if (arpIsOn != arpWasOn)
+    // ALL THREE releases are called on EVERY transition, regardless of
+    // direction. Each is idempotent, so exactly one of them actually does
+    // anything - which is what makes a stuck note unreachable by any toggle
+    // order, rather than merely unlikely. See documents/arpeggiator-design.md
+    // sections 6 and 7, and documents/step-sequencer-design.md sections 6
+    // and 7 (S1-S4).
+    if (desiredOwner != currentOwner)
     {
         router.releaseVoice (voice);
         arp.releaseVoice (voice);
+        seq.releaseVoice (voice);
 
-        // T2: the keys are still down, so the held chord must sound again
-        // immediately rather than waiting for the next key press.
-        if (! arpIsOn)
+        // T2/S4: only the router needs an explicit "sound it again now" call.
+        // The arp and the sequencer both park their own clock on a step
+        // boundary inside releaseVoice, so their very next process() call
+        // below opens the first step at once (T1/S3) - the router is not
+        // clocked, so without this a chord already held would stay silent
+        // until the next key event.
+        if (desiredOwner == VoiceOwner::Keys)
             router.retakeVoice (voice, priorityMode);
 
-        arpWasOn = arpIsOn;
+        currentOwner = desiredOwner;
     }
 
     // Drain queued note events before rendering, so the envelope and glide
     // target are settled for the whole block. Block-granular rather than
     // sample-accurate is deliberate for item 4 - human timing jitter dwarfs a
     // block boundary, and CLAUDE.md ties sample-accuracy to item 5's arp clock
-    // specifically. That line still holds with the arp on: STEPS are
-    // sample-accurate, the human's first key press still quantises to a block.
+    // (and item 7's step clock) specifically. That line still holds with the
+    // arp or the seq on: STEPS are sample-accurate, the human's first key
+    // press still quantises to a block.
     //
     // In TrackOnly the held-note stack is still updated - only the voice calls
-    // are withheld - which is exactly what lets the arp read a live held set
-    // and what makes the transitions above cheap.
+    // are withheld - which is exactly what lets the arp read a live held set,
+    // and what makes the transitions above cheap regardless of which non-Keys
+    // owner is active.
     router.dispatchPendingEvents (voice, priorityMode,
-                                   arpIsOn ? NoteRouter::VoiceDrive::TrackOnly
-                                           : NoteRouter::VoiceDrive::Direct);
+                                   desiredOwner == VoiceOwner::Keys ? NoteRouter::VoiceDrive::Direct
+                                                                     : NoteRouter::VoiceDrive::TrackOnly);
 
-    if (arpIsOn)
+    switch (desiredOwner)
     {
-        // The arp splits this one call into per-step sub-blocks, driving the
-        // voice at exact sample positions inside the block - the reason
-        // renderNextBlock takes a raw pointer and a count.
-        arp.process (voice, router.getNoteStack().getHeldNotes(), output, numSamples);
-    }
-    else
-    {
-        voice.renderNextBlock (output, numSamples);
+        case VoiceOwner::Arp:
+            // The arp splits this one call into per-step sub-blocks, driving
+            // the voice at exact sample positions inside the block - the
+            // reason renderNextBlock takes a raw pointer and a count.
+            arp.process (voice, router.getNoteStack().getHeldNotes(), output, numSamples);
+            break;
+
+        case VoiceOwner::Seq:
+            // The sequencer has no keyboard input of its own - it reads its
+            // pattern straight out of VoiceParameters by index, so it takes
+            // no HeldNotes span, unlike the arp.
+            seq.process (voice, output, numSamples);
+            break;
+
+        case VoiceOwner::Keys:
+        default:
+            voice.renderNextBlock (output, numSamples);
+            break;
     }
 }
 
@@ -1126,7 +1156,7 @@ namespace
 
             for (int block = 0; block < numBlocks; ++block)
             {
-                renderVoiceBlock (voice, router, arp, arpWasOn, output.data(), blockSize);
+                renderVoiceBlock (voice, router, arp, seq, owner, output.data(), blockSize);
 
                 for (auto sample : output)
                     peak = juce::jmax (peak, std::abs (sample));
@@ -1142,6 +1172,7 @@ namespace
             voice.reset();
             router.reset();
             arp.reset();
+            seq.reset();
 
             // The device dropped the held notes with the stack, so the bench's
             // idea of which keys are down has to drop them too.
@@ -1166,10 +1197,11 @@ namespace
         {
             voice.prepare (sampleRate);
             arp.prepare (sampleRate);
+            seq.prepare (sampleRate);
 
             // Forces the first block to re-run the hand-over whichever side is
             // switched on - MainComponent::prepareToPlay does the same.
-            arpWasOn = false;
+            owner = VoiceOwner::Keys;
         }
 
         // 16kHz, not 44.1: this test renders tens of thousands of samples at
@@ -1183,7 +1215,8 @@ namespace
         SynthVoice voice;
         NoteRouter router;
         Arpeggiator arp;
-        bool arpWasOn = false;
+        StepSequencer seq;
+        VoiceOwner owner = VoiceOwner::Keys;
 
         std::array<float, (size_t) blockSize> output {};
         std::array<bool, (size_t) numTestKeys> keyIsDown {};

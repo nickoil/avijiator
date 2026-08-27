@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "StepSequencer.h"
 
 #include <cmath>
 
@@ -104,6 +105,37 @@ MainComponent::MainComponent()
     // rather than by any one call being wrong. So this one drives whole blocks
     // through the real hand-over and asserts silence in the rendered output.
     runArpTransitionSelfTest();
+
+    // Item 7, build step 1: storage only, no render loop yet - see
+    // documents/step-sequencer-design.md sections 4 and 10.
+    runStepSequencerPatternSelfTest();
+
+    // Item 7, build step 2: the render loop itself, driven through a real
+    // SynthVoice with a fixed test pattern - not yet reachable from this
+    // class's own getNextAudioBlock, since the arp/seq/keys hand-over is
+    // build step 4. See documents/step-sequencer-design.md sections 3 and 10.
+    runStepSequencerRenderSelfTest();
+
+    // Item 7, build step 3: currentVelocity's two new summing points inside
+    // SynthVoice itself (amp and cutoff) - independent of the sequencer, so
+    // this exercises SynthVoice directly rather than through StepSequencer.
+    // No UI knob yet (see VoiceParameters.h's comment on
+    // velocityToAmpDepth/velocityToCutoffDepthOctaves) - step 6 is where the
+    // panel's row-B width budget gets touched to make room for one.
+    runAccentDepthSelfTest();
+
+    // Item 7, build step 4: the 3-way keys/arp/seq hand-over itself - a stuck
+    // note here is a property of the SEAM between all four collaborators, not
+    // any one of them, same reasoning as runArpTransitionSelfTest. This class's
+    // own getNextAudioBlock now actually reaches StepSequencer::process, via
+    // the same renderVoiceBlock that test drives.
+    runSeqTransitionSelfTest();
+
+    // Item 7, build step 5: setStepFilterModulation's two new summing points
+    // inside SynthVoice itself (cutoff and the brand-new resonance one) -
+    // independent of the sequencer, so this exercises SynthVoice directly,
+    // same split as build step 3's runAccentDepthSelfTest above.
+    runFilterAutomationSelfTest();
    #endif
 
     qwertyInput.onNoteEvent = [this] (const NoteEvent& event)
@@ -244,13 +276,15 @@ void MainComponent::prepareToPlay (int /*samplesPerBlockExpected*/, double sampl
 {
     voice.prepare (sampleRate);
 
-    // T8: the arp's pending gate is a count of samples, so it is meaningless
-    // at a new rate. prepare() resets it along with the clock and the walker.
+    // T8/S9: the arp's and the sequencer's pending gates are both a count of
+    // samples, so they are meaningless at a new rate. prepare() resets each
+    // one along with its own clock (and, for the arp, the walker).
     arp.prepare (sampleRate);
+    sequencer.prepare (sampleRate);
 
     // Force the first block after a device change to re-run the hand-over,
     // whichever side happens to be switched on.
-    arpWasOn = false;
+    voiceOwner = VoiceOwner::Keys;
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
@@ -269,13 +303,15 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
     // Mono voice: render once into channel 0, then fan out.
     auto* mono = buffer->getWritePointer (0, startSample);
 
-    // The hand-over between the router and the arp, the event drain and the
-    // render all live in renderVoiceBlock - a free function rather than lines
-    // here, purely so runArpTransitionSelfTest can drive the real thing rather
-    // than a copy of it. Nothing moved out of this class's ownership: the
-    // voice, the router, the arp and arpWasOn are all still members, passed in
-    // by reference. See documents/arpeggiator-design.md section 7.
-    renderVoiceBlock (voice, router, arp, arpWasOn, mono, numSamples);
+    // The hand-over between the router, the arp and the sequencer, the event
+    // drain and the render all live in renderVoiceBlock - a free function
+    // rather than lines here, purely so runArpTransitionSelfTest and
+    // runSeqTransitionSelfTest can drive the real thing rather than a copy of
+    // it. Nothing moved out of this class's ownership: the voice, the router,
+    // the arp, the sequencer and voiceOwner are all still members, passed in
+    // by reference. See documents/arpeggiator-design.md section 7 and
+    // documents/step-sequencer-design.md section 6.
+    renderVoiceBlock (voice, router, arp, sequencer, voiceOwner, mono, numSamples);
 
     for (int channel = 1; channel < buffer->getNumChannels(); ++channel)
         buffer->copyFrom (channel, startSample, mono, numSamples);
@@ -283,15 +319,16 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
 void MainComponent::releaseResources()
 {
-    // Ordered voice, router, arp: the voice goes silent first, then neither
-    // owner is left believing it is driving something. T7 - without the arp
-    // reset, a restart would resurrect an open gate mid-step.
+    // Ordered voice, router, arp, seq: the voice goes silent first, then no
+    // owner is left believing it is driving something. T7/S8 - without the
+    // arp/seq reset, a restart would resurrect an open gate mid-step.
     voice.reset();
 
     // Clear held notes too, so stopping the device can't leave a phantom note
     // latched in the stack and stick on when it restarts.
     router.reset();
     arp.reset();
+    sequencer.reset();
 }
 
 void MainComponent::paint (juce::Graphics& g)

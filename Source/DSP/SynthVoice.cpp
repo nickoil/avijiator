@@ -1,6 +1,7 @@
 #include "SynthVoice.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 void SynthVoice::prepare (double newSampleRate)
@@ -23,6 +24,15 @@ void SynthVoice::prepare (double newSampleRate)
     envToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
     lfoToPitchDepthSmoothed.reset (newSampleRate, rampSeconds);
     lfoToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
+    velocityToAmpDepthSmoothed.reset (newSampleRate, rampSeconds);
+    velocityToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
+
+    // Not part of snapshotParameters' apply() list below - setStepFilterModulation
+    // drives these directly - but still need their ramp step-size machinery
+    // set up at the current sample rate. reset() does not disturb the stored
+    // value, so these stay at their post-construction 0/0 until first pushed.
+    stepCutoffNormSmoothed.reset (newSampleRate, rampSeconds);
+    stepResonanceNormSmoothed.reset (newSampleRate, resonanceRampSeconds);
 
     snapshotParameters (true); // jump straight to target - block 1 shouldn't ramp up from zero
 }
@@ -42,6 +52,14 @@ void SynthVoice::reset() noexcept
 
     voiceGated = false;
     currentVelocity = 0.0f;
+
+    // A device stop must not leave a stale filter-lane modulation hanging
+    // around, same hygiene reasoning as currentVelocity above - S8's
+    // ordering (voice.reset(); router.reset(); arp.reset(); seq.reset();)
+    // means whichever pattern was last pushed here should not survive a
+    // restart.
+    stepCutoffNormSmoothed.setCurrentAndTargetValue (0.0f);
+    stepResonanceNormSmoothed.setCurrentAndTargetValue (0.0f);
 }
 
 //==============================================================================
@@ -88,6 +106,14 @@ void SynthVoice::noteOff() noexcept
     voiceGated = false;
 }
 
+void SynthVoice::setStepFilterModulation (float cutoffNorm, float resonanceNorm) noexcept
+{
+    // Pushed straight into each smoother's target - see the doc comment in
+    // SynthVoice.h for why this bypasses the atomic-polling apply() pattern.
+    stepCutoffNormSmoothed.setTargetValue (cutoffNorm);
+    stepResonanceNormSmoothed.setTargetValue (resonanceNorm);
+}
+
 void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
 {
     // Change-guard: renderNextBlock calls this once per block normally, but
@@ -125,6 +151,8 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
     apply (envToCutoffDepthSmoothed, lastEnvToCutoffDepth, parameters.envToCutoffDepthOctaves.load (std::memory_order_relaxed));
     apply (lfoToPitchDepthSmoothed, lastLfoToPitchDepth, parameters.lfoToPitchDepthOctaves.load (std::memory_order_relaxed));
     apply (lfoToCutoffDepthSmoothed, lastLfoToCutoffDepth, parameters.lfoToCutoffDepthOctaves.load (std::memory_order_relaxed));
+    apply (velocityToAmpDepthSmoothed, lastVelocityToAmpDepth, parameters.velocityToAmpDepth.load (std::memory_order_relaxed));
+    apply (velocityToCutoffDepthSmoothed, lastVelocityToCutoffDepth, parameters.velocityToCutoffDepthOctaves.load (std::memory_order_relaxed));
 }
 
 void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
@@ -180,12 +208,19 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         // reused for both destinations below, for the same reason as envValue.
         const auto lfoValue = lfo.processSample();
 
+        // Velocity -> amp summing point, item 7 build step 3. Multiplicative
+        // and unity-defaulted at depth 0, same convention as the envelope
+        // term it multiplies against below - a patch that never touches this
+        // knob renders byte-identically to before this step, whatever
+        // velocity happens to arrive.
+        const auto velocityAmpFactor = 1.0f - velocityToAmpDepthSmoothed.getNextValue() * (1.0f - currentVelocity);
+
         // Amplitude modulation summing point - the shared ADSR (when routed
         // to the VCA) and item 7's accent multiply in here. Multiplicative
         // and unity-defaulted when not routed here, unlike the
         // additive-octaves pitch/cutoff points, which are additive and
         // zero-defaulted.
-        const auto amplitudeModulation = routeEnvToAmp ? envValue : 1.0f;
+        const auto amplitudeModulation = (routeEnvToAmp ? envValue : 1.0f) * velocityAmpFactor;
 
         // Pitch modulation summing point, in octaves. Item 4's glide will add
         // its offset here too. Octaves rather than Hz so modulators compose
@@ -206,17 +241,44 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
                        + frame.sub           * subLevelSmoothed.getNextValue()
                        + noise.processSample() * noiseLevelSmoothed.getNextValue();
 
-        // Cutoff modulation summing point, in octaves - and unlike pitch, TWO
-        // sources land here: the shared envelope and the LFO. Octaves rather
-        // than Hz because a modulator that moves the cutoff by a fixed number
-        // of Hz sounds completely different at 200 Hz and at 5 kHz. The exp2
-        // happens inside Vcf, after this sum.
+        // Cutoff modulation summing point, in octaves - FOUR sources land
+        // here: the shared envelope, the LFO, velocity (item 7 build step 3)
+        // and now the step sequencer's own filter lane (build step 5).
+        // Octaves rather than Hz because a modulator that moves the cutoff by
+        // a fixed number of Hz sounds completely different at 200 Hz and at
+        // 5 kHz. The exp2 happens inside Vcf, after this sum.
+        // Velocity's own term: reference point is velocity == 1.0 (zero
+        // shift there, matching every note source that doesn't vary velocity
+        // - QWERTY, the arp, an accented sequencer step) - only a velocity
+        // BELOW that pulls the cutoff down.
+        // stepCutoffNormSmoothed's term: 0..1, scaled by the fixed
+        // seqCutoffModRangeOctaves constant (SynthVoice.h) - 0 is exactly 0
+        // octaves, matching the pattern array's own zero default.
+        // All four terms are additive and zero-defaulted.
         const auto cutoffModulationOctaves =
             (routeEnvToFilter ? envValue * envToCutoffDepthSmoothed.getNextValue() : 0.0f)
-            + lfoValue * lfoToCutoffDepthSmoothed.getNextValue();
+            + lfoValue * lfoToCutoffDepthSmoothed.getNextValue()
+            + (currentVelocity - 1.0f) * velocityToCutoffDepthSmoothed.getNextValue()
+            + stepCutoffNormSmoothed.getNextValue() * seqCutoffModRangeOctaves;
 
         const auto cutoffOctaves = cutoffLog2Smoothed.getNextValue() + cutoffModulationOctaves;
-        const auto filtered = filter.processSample (mix, cutoffOctaves, resonanceSmoothed.getNextValue());
+
+        // Resonance modulation summing point, item 7 build step 5 - the step
+        // sequencer's filter lane is the first-ever consumer of resonance
+        // modulation in this instrument (documents/step-sequencer-design.md
+        // section 5 confirms zero pre-existing env/LFO routing here). Unlike
+        // cutoff's octave-style sum, resonance is already a normalised 0..1
+        // quantity, so section 5's open question is resolved with a simple
+        // additive offset instead - added straight onto the knob's own
+        // value, zero-defaulted the same way as every other term above.
+        // Clamped post-sum: not just taste but stability -
+        // Vcf::processSample's feedback solution assumes resonance01 in
+        // [0,1], and an out-of-range value (over-boosted, or pulled negative
+        // by a future bipolar use) could push its denominator below 1.
+        const auto resonance01 = juce::jlimit (0.0f, 1.0f,
+            resonanceSmoothed.getNextValue() + stepResonanceNormSmoothed.getNextValue());
+
+        const auto filtered = filter.processSample (mix, cutoffOctaves, resonance01);
 
         output[i] = Vca::processSample (filtered, outputLevelSmoothed.getNextValue(), amplitudeModulation);
     }
@@ -268,3 +330,161 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         std::fill (output, output + numSamples, 0.0f);
     }
 }
+
+//==============================================================================
+#if JUCE_DEBUG
+
+namespace
+{
+    constexpr double selfTestSampleRate = 48000.0;
+    constexpr int selfTestBlockSamples = 1000;
+
+    // log2(220) - A3. Arbitrary mid-range pitch, same "defined value, never
+    // tuned for anything" spirit as defaultPitchLog2Hz above; picked only so
+    // the saw source has harmonic content for a cutoff shift to act on.
+    constexpr float selfTestPitchLog2Hz = 7.7814f;
+
+    float peakAbs (const float* buffer, int numSamples) noexcept
+    {
+        auto peak = 0.0f;
+        for (int i = 0; i < numSamples; ++i)
+            peak = juce::jmax (peak, std::abs (buffer[i]));
+        return peak;
+    }
+
+    // One voice, one note, one block. Destination pinned to Filter rather
+    // than left at its own default (Amp) so the shared ADSR's attack ramp
+    // never touches the amp path under test - amplitudeModulation then comes
+    // ENTIRELY from velocityAmpFactor, with nothing else moving during the
+    // block. Every depth this test isn't specifically exercising is passed
+    // as 0, matching the atomics' own real defaults.
+    void renderOneNote (float velocity, float velocityToAmpDepth, float velocityToCutoffDepthOctaves,
+                         float* output, int numSamples)
+    {
+        SynthVoice voice;
+        auto& parameters = voice.getParameters();
+        parameters.envelopeDestination.store ((int) EnvelopeDestination::Filter);
+        parameters.velocityToAmpDepth.store (velocityToAmpDepth);
+        parameters.velocityToCutoffDepthOctaves.store (velocityToCutoffDepthOctaves);
+
+        voice.prepare (selfTestSampleRate); // snapshots the atomics above, jumping straight to target
+        voice.noteOn (selfTestPitchLog2Hz, velocity);
+        voice.renderNextBlock (output, numSamples);
+    }
+
+    // Item 7 build step 5. Same shape as renderOneNote above, but pushes the
+    // per-step filter-lane values via setStepFilterModulation instead of an
+    // atomic - there is no atomic to set, since these are audio-thread
+    // working state, not a VoiceParameters knob. Velocity is fixed at 1.0 and
+    // both velocity depths stay at their real 0 default, so build step 3's
+    // terms cannot be the source of any difference this test observes.
+    void renderOneNoteWithStepMod (float stepCutoffNorm, float stepResonanceNorm,
+                                    float* output, int numSamples)
+    {
+        SynthVoice voice;
+        auto& parameters = voice.getParameters();
+        parameters.envelopeDestination.store ((int) EnvelopeDestination::Filter);
+
+        voice.prepare (selfTestSampleRate);
+        voice.setStepFilterModulation (stepCutoffNorm, stepResonanceNorm);
+        voice.noteOn (selfTestPitchLog2Hz, 1.0f);
+        voice.renderNextBlock (output, numSamples);
+    }
+}
+
+void runAccentDepthSelfTest()
+{
+    using Buffer = std::array<float, selfTestBlockSamples>;
+
+    //==========================================================================
+    // BOTH DEPTHS INERT AT THEIR REAL DEFAULT (0): a full-velocity and a
+    // half-velocity note must render byte-identically - velocityAmpFactor's
+    // "1.0f - 0.0f * (1.0f - v)" degrades to exactly 1.0f regardless of v,
+    // and the cutoff term's "(v - 1.0f) * 0.0f" degrades to exactly 0.0f the
+    // same way. This is documents/step-sequencer-design.md section 12's
+    // "at default, byte-identical" claim, proven rather than assumed.
+    Buffer fullVelocityBothZero {};
+    Buffer halfVelocityBothZero {};
+    renderOneNote (1.0f, 0.0f, 0.0f, fullVelocityBothZero.data(), selfTestBlockSamples);
+    renderOneNote (0.5f, 0.0f, 0.0f, halfVelocityBothZero.data(), selfTestBlockSamples);
+    jassert (fullVelocityBothZero == halfVelocityBothZero);
+
+    //==========================================================================
+    // VELOCITY -> AMP, TURNED UP: isolated by holding the cutoff depth at 0.
+    // At depth 1.0 the factor is exactly velocity itself (1 - 1*(1-v) = v),
+    // so the two renders are the SAME filtered signal scaled by an exact,
+    // known constant - not just "quieter", but exactly half, since Vca is a
+    // bare multiply (Vca.h) and 0.5 is exactly representable.
+    Buffer fullVelocityAmpDepth {};
+    Buffer halfVelocityAmpDepth {};
+    renderOneNote (1.0f, 1.0f, 0.0f, fullVelocityAmpDepth.data(), selfTestBlockSamples);
+    renderOneNote (0.5f, 1.0f, 0.0f, halfVelocityAmpDepth.data(), selfTestBlockSamples);
+    const auto peakFullAmp = peakAbs (fullVelocityAmpDepth.data(), selfTestBlockSamples);
+    const auto peakHalfAmp = peakAbs (halfVelocityAmpDepth.data(), selfTestBlockSamples);
+    jassert (peakFullAmp > 0.01f); // sanity - the reference note must actually be sounding
+    jassert (peakHalfAmp == peakFullAmp * 0.5f);
+
+    //==========================================================================
+    // VELOCITY -> CUTOFF, TURNED UP: isolated by holding the amp depth at 0,
+    // so amplitudeModulation is identically 1.0f in both renders and cannot
+    // be the source of any difference. Reference velocity (1.0) contributes
+    // a zero shift by construction; half velocity pulls the cutoff down a
+    // full octave at this depth, which the default 2000 Hz cutoff and the
+    // saw's harmonic content are comfortably positioned to make audible.
+    // No exact ratio to check here - unlike Vca's bare multiply, Vcf's
+    // response to a cutoff shift isn't a closed form worth hand-deriving in
+    // a test - so this only proves the term is REACHING the filter, same
+    // "not byte-identical" idiom runStepSequencerRenderSelfTest already uses
+    // for its own cutoff/resonance-lane and accent checks.
+    Buffer fullVelocityCutoffDepth {};
+    Buffer halfVelocityCutoffDepth {};
+    renderOneNote (1.0f, 0.0f, 2.0f, fullVelocityCutoffDepth.data(), selfTestBlockSamples);
+    renderOneNote (0.5f, 0.0f, 2.0f, halfVelocityCutoffDepth.data(), selfTestBlockSamples);
+    jassert (! (fullVelocityCutoffDepth == halfVelocityCutoffDepth));
+}
+
+void runFilterAutomationSelfTest()
+{
+    using Buffer = std::array<float, selfTestBlockSamples>;
+
+    //==========================================================================
+    // UNTOUCHED VS. EXPLICITLY (0, 0): there is no separate depth knob here -
+    // the lane VALUE is what gets summed directly - so the only inert case is
+    // the value itself being 0, exactly matching stepCutoffNorm/
+    // stepResonanceNorm's own zero default. Exact, not approximate:
+    // 0 * seqCutoffModRangeOctaves is exactly 0.0f, and
+    // resonanceSmoothed + 0.0f is exactly resonanceSmoothed - so a note that
+    // never calls setStepFilterModulation renders byte-identically to one
+    // that calls it with both lanes at 0.
+    Buffer untouched {};
+    Buffer explicitZero {};
+    renderOneNote (1.0f, 0.0f, 0.0f, untouched.data(), selfTestBlockSamples);
+    renderOneNoteWithStepMod (0.0f, 0.0f, explicitZero.data(), selfTestBlockSamples);
+    jassert (untouched == explicitZero);
+
+    //==========================================================================
+    // CUTOFF LANE, TURNED UP: isolated by holding the resonance lane at 0.
+    // No exact ratio to check - same "not byte-identical" idiom
+    // runAccentDepthSelfTest's own cutoff-depth block uses, for the same
+    // reason: Vcf's response to a cutoff shift isn't a closed form worth
+    // hand-deriving in a test.
+    Buffer cutoffBaseline {};
+    Buffer cutoffLifted {};
+    renderOneNoteWithStepMod (0.0f, 0.0f, cutoffBaseline.data(), selfTestBlockSamples);
+    renderOneNoteWithStepMod (1.0f, 0.0f, cutoffLifted.data(), selfTestBlockSamples);
+    jassert (peakAbs (cutoffBaseline.data(), selfTestBlockSamples) > 0.01f); // sanity - actually sounding
+    jassert (! (cutoffBaseline == cutoffLifted));
+
+    //==========================================================================
+    // RESONANCE LANE, TURNED UP: isolated by holding the cutoff lane at 0.
+    // Same idiom, isolating the brand-new resonance summing point this build
+    // step adds - the first modulation input resonance has ever had in this
+    // instrument.
+    Buffer resonanceBaseline {};
+    Buffer resonanceLifted {};
+    renderOneNoteWithStepMod (0.0f, 0.0f, resonanceBaseline.data(), selfTestBlockSamples);
+    renderOneNoteWithStepMod (0.0f, 1.0f, resonanceLifted.data(), selfTestBlockSamples);
+    jassert (! (resonanceBaseline == resonanceLifted));
+}
+
+#endif
