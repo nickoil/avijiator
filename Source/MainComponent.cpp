@@ -3,150 +3,6 @@
 #include <cmath>
 
 //==============================================================================
-// Ordered top-to-bottom as they appear in the window. Item 2's nine controls,
-// then item 3's four ADSR sliders and three LFO/depth sliders, landed
-// incrementally by extending this table and bumping numDebugControls - the
-// pattern item 4 will follow too.
-const MainComponent::DebugControlSpec MainComponent::debugControlSpecs[numDebugControls] =
-{
-    { "Saw",          0.0,    1.0,  0.70, false, &VoiceParameters::sawLevel    },
-    { "Pulse",        0.0,    1.0,  0.00, false, &VoiceParameters::pulseLevel  },
-    { "Pulse width",  0.02,   0.98, 0.50, false, &VoiceParameters::pulseWidth  },
-    { "Sub",          0.0,    1.0,  0.00, false, &VoiceParameters::subLevel    },
-    { "Noise",        0.0,    1.0,  0.00, false, &VoiceParameters::noiseLevel  },
-    { "Cutoff",      20.0, 18000.0, 2000.0, true, &VoiceParameters::cutoffLog2Hz },
-    { "Resonance",    0.0,    1.0,  0.20, false, &VoiceParameters::resonance   },
-    { "Level",        0.0,    1.0,  0.25, false, &VoiceParameters::outputLevel },
-    { "Attack",     0.001,    5.0,  0.01, false, &VoiceParameters::attackSeconds  },
-    { "Decay",      0.001,    5.0,   0.1, false, &VoiceParameters::decaySeconds   },
-    { "Sustain",       0.0,    1.0,   0.7, false, &VoiceParameters::sustainLevel  },
-    { "Release",    0.001,    5.0,   0.3, false, &VoiceParameters::releaseSeconds },
-    { "Env->Cutoff",   0.0,    8.0,   0.0, false, &VoiceParameters::envToCutoffDepthOctaves },
-    { "LFO Rate",     0.02,   20.0,   2.0, false, &VoiceParameters::lfoRateHz },
-    { "LFO->Pitch",    0.0,    1.0,   0.0, false, &VoiceParameters::lfoToPitchDepthOctaves },
-    { "LFO->Cutoff",   0.0,    8.0,   0.0, false, &VoiceParameters::lfoToCutoffDepthOctaves },
-    { "Glide Time",    0.0,    5.0,   0.0, false, &VoiceParameters::glideTimeSeconds },
-    // Range matches StepClock's own clamp, so the slider cannot ask for
-    // something the clock will silently refuse.
-    { "Arp Tempo",    20.0,  300.0, 120.0, false, &VoiceParameters::arpTempoBpm },
-    // Range matches the arpeggiator's own clamp, for the same reason as Arp
-    // Tempo's above. A FRACTION of the step, not a time, so changing tempo does
-    // not also change articulation. 100% is deliberately out of reach: it would
-    // turn each step from a fresh press into a legato retarget, which is a
-    // different feature (Tie mode) rather than just a longer gate - see
-    // documents/arpeggiator-design.md sections 3 and 10.
-    { "Arp Gate",     0.05,   0.95,  0.50, false, &VoiceParameters::arpGateLength },
-};
-
-// A fifth apart, so a glide between them is unmistakable.
-const MainComponent::NoteButtonSpec MainComponent::noteButtonSpecs[numNoteButtons] =
-{
-    { "Note C4", 60 },
-    { "Note G4", 67 },
-};
-
-// One octave, C3 to C4 inclusive - the closing C makes it read as a keyboard
-// rather than stopping awkwardly on B.
-const MainComponent::KeyboardKeySpec MainComponent::keyboardKeySpecs[numKeyboardKeys] =
-{
-    { "C",   0, false }, { "C#",  1, true  }, { "D",   2, false }, { "D#",  3, true  },
-    { "E",   4, false }, { "F",   5, false }, { "F#",  6, true  }, { "G",   7, false },
-    { "G#",  8, true  }, { "A",   9, false }, { "A#", 10, true  }, { "B",  11, false },
-    { "C'", 12, false },
-};
-
-namespace
-{
-    const char* const envelopeDestinationChoices[] = { "Filter", "Amp", "Both" };
-    const char* const lfoWaveformChoices[] = { "Triangle", "Square", "S & H" };
-    const char* const legatoRetriggerChoices[] = { "Retrigger", "Legato" };
-    const char* const notePriorityChoices[] = { "Last Note", "Highest Note" };
-    const char* const arpEnabledChoices[] = { "Off", "On" };
-
-    // Order and text follow StepDivision exactly - longest step first, so the
-    // list reads slow -> fast and the selected index stores straight into the
-    // atomic with no mapping.
-    const char* const arpDivisionChoices[] = { "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
-
-    static_assert ((int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])) == numStepDivisions,
-                   "the division combo box and StepDivision's table must stay in step");
-
-    // Order follows ArpPattern exactly, so the selected index stores straight
-    // into the atomic with no mapping - same convention as every other row here.
-    const char* const arpPatternChoices[] = { "Up", "Down", "Up-Down", "Random", "As Played" };
-
-    static_assert ((int) (sizeof (arpPatternChoices) / sizeof (arpPatternChoices[0])) == numArpPatterns,
-                   "the pattern combo box and ArpPattern must stay in step");
-}
-
-// Parallel to debugControlSpecs above, for discrete switches a Slider can't
-// represent. Index into `choices` matches the enum's underlying int value
-// (EnvelopeDestination::Filter = 0, Amp = 1, Both = 2), so the combo box's
-// selected index can be stored straight into the atomic<int> with no mapping.
-const MainComponent::DebugChoiceSpec MainComponent::debugChoiceSpecs[numDebugChoiceControls] =
-{
-    {
-        "Env Destination",
-        envelopeDestinationChoices,
-        (int) (sizeof (envelopeDestinationChoices) / sizeof (envelopeDestinationChoices[0])),
-        (int) EnvelopeDestination::Amp,
-        &VoiceParameters::envelopeDestination
-    },
-    {
-        "LFO Waveform",
-        lfoWaveformChoices,
-        (int) (sizeof (lfoWaveformChoices) / sizeof (lfoWaveformChoices[0])),
-        (int) Lfo::Waveform::Triangle,
-        &VoiceParameters::lfoWaveform
-    },
-    {
-        "Glide Mode",
-        legatoRetriggerChoices,
-        (int) (sizeof (legatoRetriggerChoices) / sizeof (legatoRetriggerChoices[0])),
-        (int) LegatoRetriggerMode::Retrigger,
-        &VoiceParameters::legatoRetriggerMode
-    },
-    {
-        "Note Priority",
-        notePriorityChoices,
-        (int) (sizeof (notePriorityChoices) / sizeof (notePriorityChoices[0])),
-        (int) NotePriorityMode::LastNote,
-        &VoiceParameters::notePriorityMode
-    },
-    {
-        "Arp",
-        arpEnabledChoices,
-        (int) (sizeof (arpEnabledChoices) / sizeof (arpEnabledChoices[0])),
-        0,                                  // off on first load
-        &VoiceParameters::arpEnabled
-    },
-    {
-        // Reuses arpEnabledChoices - same two words, and a second identical
-        // array would only be ceremony. Off on first load, same reasoning as
-        // Arp: engaging hold with nothing held must never look armed by
-        // surprise.
-        "Arp Hold",
-        arpEnabledChoices,
-        (int) (sizeof (arpEnabledChoices) / sizeof (arpEnabledChoices[0])),
-        0,
-        &VoiceParameters::arpHold
-    },
-    {
-        "Arp Pattern",
-        arpPatternChoices,
-        (int) (sizeof (arpPatternChoices) / sizeof (arpPatternChoices[0])),
-        (int) ArpPattern::Up,
-        &VoiceParameters::arpPattern
-    },
-    {
-        "Arp Division",
-        arpDivisionChoices,
-        (int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])),
-        (int) StepDivision::Sixteenth,
-        &VoiceParameters::arpDivision
-    },
-};
-
 namespace
 {
     // Split out from the callback so it can be tested without MIDI hardware -
@@ -219,6 +75,10 @@ namespace
 }
 
 MainComponent::MainComponent()
+    // pushNoteEvent closes over router, which must already be constructed -
+    // see the member comment in MainComponent.h. It is only ever CALLED
+    // later, from the message thread, never during construction.
+    : panel (voice.getParameters(), [this] (const NoteEvent& event) { router.pushUiEvent (event); })
 {
    #if JUCE_DEBUG
     // All three of these fail SILENTLY when wrong - a dropped note event, a
@@ -246,164 +106,40 @@ MainComponent::MainComponent()
     runArpTransitionSelfTest();
    #endif
 
-    for (int i = 0; i < numDebugControls; ++i)
-    {
-        const auto& spec = debugControlSpecs[i];
-        auto& control = debugControls[(size_t) i];
-
-        control.label.setText (spec.name, juce::dontSendNotification);
-        control.label.setColour (juce::Label::textColourId, juce::Colours::white);
-        addAndMakeVisible (control.label);
-
-        control.slider.setSliderStyle (juce::Slider::LinearHorizontal);
-        control.slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 20);
-        control.slider.setRange (spec.minimum, spec.maximum);
-
-        // Hz-valued controls get a log-ish taper so the useful low end isn't
-        // crammed into the first few pixels of travel.
-        if (spec.storeAsLog2)
-            control.slider.setSkewFactorFromMidPoint (std::sqrt (spec.minimum * spec.maximum));
-
-        control.slider.setValue (spec.defaultValue, juce::dontSendNotification);
-        addAndMakeVisible (control.slider);
-
-        control.slider.onValueChange = [this, &spec, &control]
-        {
-            const auto value = (float) control.slider.getValue();
-
-            (voice.getParameters().*spec.target)
-                .store (spec.storeAsLog2 ? std::log2 (value) : value, std::memory_order_relaxed);
-        };
-
-        // Seed the atomics from the table so the sliders and the voice cannot
-        // disagree at startup - VoiceParameters' own defaults are a fallback.
-        control.slider.onValueChange();
-    }
-
-    for (int i = 0; i < numDebugChoiceControls; ++i)
-    {
-        const auto& spec = debugChoiceSpecs[i];
-        auto& control = debugChoiceControls[(size_t) i];
-
-        control.label.setText (spec.name, juce::dontSendNotification);
-        control.label.setColour (juce::Label::textColourId, juce::Colours::white);
-        addAndMakeVisible (control.label);
-
-        // juce::ComboBox item IDs are 1-based - 0 is reserved to mean "no
-        // selection" - so store id = choice index + 1, and subtract 1 back
-        // off when reading getSelectedId().
-        for (int choice = 0; choice < spec.numChoices; ++choice)
-            control.comboBox.addItem (spec.choices[choice], choice + 1);
-
-        control.comboBox.setSelectedId (spec.defaultIndex + 1, juce::dontSendNotification);
-        addAndMakeVisible (control.comboBox);
-
-        control.comboBox.onChange = [this, &spec, &control]
-        {
-            const auto index = control.comboBox.getSelectedId() - 1;
-            (voice.getParameters().*spec.target).store (index, std::memory_order_relaxed);
-        };
-
-        // Seed the atomic from the table, matching the float sliders' pattern.
-        control.comboBox.onChange();
-    }
-
-    for (int i = 0; i < numNoteButtons; ++i)
-    {
-        const auto& spec = noteButtonSpecs[i];
-        auto& button = noteButtons[(size_t) i];
-
-        button.setButtonText (spec.name);
-        button.onPressedChanged = [this, &spec, i] (bool isDown)
-        {
-            // LATCHING, not momentary. A mouse has exactly one pointer, so
-            // momentary buttons could never be held down together - and
-            // overlapping notes are precisely what glide and legato need in
-            // order to be tested at all. Click toggles; the release is
-            // ignored. QWERTY and MIDI (steps 5 and 7) are naturally
-            // momentary and need none of this.
-            if (! isDown)
-                return;
-
-            auto& latched = noteButtonLatched[(size_t) i];
-            latched = ! latched;
-
-            // Message thread, so constructing a juce::String here is fine -
-            // CLAUDE.md's ban on that is audio-thread-scoped.
-            noteButtons[(size_t) i].setButtonText (latched ? juce::String (spec.name) + " (on)"
-                                                            : juce::String (spec.name));
-
-            // Pitch is converted HERE, at the producer, so the audio thread
-            // never computes a logarithm and every input source converts
-            // identically.
-            //
-            // Never call voice.noteOn() directly from here: that would be an
-            // unsynchronized write into audio-thread state, exactly what this
-            // FIFO exists to prevent.
-            router.pushUiEvent ({ latched ? NoteEvent::Type::NoteOn : NoteEvent::Type::NoteOff,
-                                  (std::uint8_t) spec.midiNoteNumber,
-                                  pitchLog2HzForMidiNote (spec.midiNoteNumber),
-                                  1.0f });
-        };
-        addAndMakeVisible (button);
-    }
-
     qwertyInput.onNoteEvent = [this] (const NoteEvent& event)
     {
         router.pushUiEvent (event);
     };
 
-    for (int i = 0; i < numKeyboardKeys; ++i)
+    panel.onAudioSettingsClicked = [this] { showAudioSettings(); };
+
+    // Octave buttons drive QwertyNoteInput's own shift (comma/period's exact
+    // same clamped adjustment) and then mirror the result back into the
+    // panel, the same way keyStateChanged does below for comma/period - see
+    // SynthPanel::onOctaveUpClicked's comment.
+    panel.onOctaveUpClicked = [this]
     {
-        const auto& spec = keyboardKeySpecs[i];
-        auto& key = keyboardButtons[(size_t) i];
+        qwertyInput.octaveUp();
+        panel.setOctaveShift (qwertyInput.getOctaveShift());
+    };
+    panel.onOctaveDownClicked = [this]
+    {
+        qwertyInput.octaveDown();
+        panel.setOctaveShift (qwertyInput.getOctaveShift());
+    };
 
-        key.setButtonText (spec.name);
-        key.setWantsKeyboardFocus (false);
+    addAndMakeVisible (panel);
 
-        // Black keys darker, so the layout reads as a keyboard at a glance.
-        key.setColour (juce::TextButton::buttonColourId,
-                        spec.isBlackKey ? juce::Colours::darkslategrey : juce::Colours::grey);
-
-        key.onPressedChanged = [this, &spec] (bool isDown)
-        {
-            const auto noteNumber = keyboardBaseNoteNumber + spec.semitoneOffset;
-
-            router.pushUiEvent ({ isDown ? NoteEvent::Type::NoteOn : NoteEvent::Type::NoteOff,
-                                  (std::uint8_t) noteNumber,
-                                  pitchLog2HzForMidiNote (noteNumber),
-                                  1.0f });
-        };
-
-        addAndMakeVisible (key);
-    }
-
-    audioSettingsButton.setButtonText ("Audio Settings");
-    audioSettingsButton.onClick = [this] { showAudioSettings(); };
-    audioSettingsButton.setWantsKeyboardFocus (false);
-    addAndMakeVisible (audioSettingsButton);
-
-    // The component itself takes keyboard focus, and the mouse-driven
-    // controls explicitly decline it - otherwise clicking a slider would
-    // steal focus and silently stop the keyboard playing notes. Combo boxes
-    // are left alone, since they genuinely need keys to operate.
+    // The component itself takes keyboard focus so QWERTY note input works
+    // as soon as the window is up - every mouse-driven control on the panel
+    // explicitly declines focus (documents/ui-design.md section 6.1), so
+    // clicking one never steals it away.
     setWantsKeyboardFocus (true);
 
-    for (auto& control : debugControls)
-        control.slider.setWantsKeyboardFocus (false);
-
-    for (auto& button : noteButtons)
-        button.setWantsKeyboardFocus (false);
-
-    // Two columns of controls - 21 rows in a single column needs ~700px of
-    // height, which pushed the button row off the bottom of the window.
-    //
-    // 660 rather than 560 because item 5's rows overflow the taller column at
-    // the old height: 24 rows means 12 in the left column at 30px each = 360px
-    // against the 358px that existed. Bumped in the SAME step that adds the
-    // rows - note-handling-design.md records this exact overflow happening
-    // before, so it is not a Polish afterthought.
-    setSize (900, 660);
+    // Matches the design canvas 1:1 at startup - the window is resizable
+    // (Main.cpp's setResizable), and resized() below scales the panel to fit
+    // whatever size it becomes from here.
+    setSize (SynthPanel::designWidth, SynthPanel::designHeight);
     setAudioChannels (0, 2); // no input, stereo out
 
     // After setAudioChannels, so the device manager is initialised.
@@ -424,7 +160,6 @@ void MainComponent::enableAllMidiInputs()
     // without re-registering per device.
     deviceManager.addMidiInputDeviceCallback ({}, this);
 }
-
 
 void MainComponent::handleIncomingMidiMessage (juce::MidiInput* /*source*/,
                                                 const juce::MidiMessage& message)
@@ -466,6 +201,11 @@ bool MainComponent::keyStateChanged (bool /*isKeyDown*/)
 {
     qwertyInput.pollKeyStates();
 
+    // Mirrors the shift into the panel so a comma/period press moves the
+    // on-screen keyboard and its readout exactly as an Octave button click
+    // would - see SynthPanel::onOctaveUpClicked's comment.
+    panel.setOctaveShift (qwertyInput.getOctaveShift());
+
     // Not consumed: this only observes key state, so anything else that wants
     // these keys should still get them.
     return false;
@@ -474,6 +214,17 @@ bool MainComponent::keyStateChanged (bool /*isKeyDown*/)
 void MainComponent::focusLost (FocusChangeType /*cause*/)
 {
     qwertyInput.releaseAllHeldKeys();
+}
+
+void MainComponent::visibilityChanged()
+{
+    // See the declaration comment in MainComponent.h - this replaces the old
+    // "click background first" reliance now that SynthPanel covers every
+    // clickable pixel. isShowing() guards against grabbing focus on the
+    // transient becomes-invisible-then-visible flicker some platforms send
+    // during window setup, before there's a real peer to grab focus onto.
+    if (isShowing())
+        grabKeyboardFocus();
 }
 
 MainComponent::~MainComponent()
@@ -545,82 +296,30 @@ void MainComponent::releaseResources()
 
 void MainComponent::paint (juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-
-    g.setColour (juce::Colours::white);
-    g.setFont (16.0f);
-    g.drawFittedText ("Play: MIDI keyboard, computer keys Z S X D C V G B H N J M (comma/period "
-                      "shift octave, click background first), or the keyboard below.",
-                       getLocalBounds().removeFromTop (60).reduced (20),
-                       juce::Justification::centred,
-                       2);
+    // The letterbox bars either side of the scaled panel - SynthPanel paints
+    // its own ground (PanelLookAndFeel::panel) inside itself, so this is only
+    // ever visible when the window's aspect doesn't match the design canvas.
+    g.fillAll (PanelLookAndFeel::background);
 }
 
 void MainComponent::resized()
 {
-    static constexpr int labelWidth = 120;
-    static constexpr int rowHeight = 24;
-    static constexpr int rowGap = 6;
+    // documents/ui-design.md section 5, "The scaling, in
+    // MainComponent::resized()" - fit-to-window scale, transform on the
+    // CHILD panel rather than this component, so JUCE's hit-testing keeps
+    // mapping mouse clicks through the transform correctly.
+    const auto scale = juce::jmin ((float) getWidth()  / (float) SynthPanel::designWidth,
+                                    (float) getHeight() / (float) SynthPanel::designHeight);
 
-    auto area = getLocalBounds().reduced (20);
-    area.removeFromTop (60); // banner text
+    // Centred, not just top-left anchored: the design canvas's 1.94:1 aspect
+    // (documents/ui-design.md section 3) won't match every window shape, so
+    // one axis is left with slack - split evenly either side rather than
+    // dumped on the right/bottom.
+    const auto scaledWidth  = (float) SynthPanel::designWidth  * scale;
+    const auto scaledHeight = (float) SynthPanel::designHeight * scale;
+    const auto offsetX = ((float) getWidth()  - scaledWidth)  * 0.5f;
+    const auto offsetY = ((float) getHeight() - scaledHeight) * 0.5f;
 
-    // Buttons come off the BOTTOM first, so however many control rows there
-    // are they can never push the buttons off-screen - which is exactly what
-    // was happening with a single column.
-    auto buttonRow = area.removeFromBottom (28);
-    area.removeFromBottom (12);
-
-    for (auto& button : noteButtons)
-    {
-        button.setBounds (buttonRow.removeFromLeft (110));
-        buttonRow.removeFromLeft (8);
-    }
-
-    buttonRow.removeFromLeft (24); // separate the settings button from the notes
-    audioSettingsButton.setBounds (buttonRow.removeFromLeft (130));
-
-    // Clickable keyboard sits just above the buttons, also reserved from the
-    // bottom so control rows can never push it off-screen.
-    area.removeFromBottom (10);
-    auto keyboardRow = area.removeFromBottom (40);
-    area.removeFromBottom (12);
-
-    const auto keyWidth = keyboardRow.getWidth() / numKeyboardKeys;
-
-    for (auto& key : keyboardButtons)
-        key.setBounds (keyboardRow.removeFromLeft (keyWidth).reduced (1, 0));
-
-    //==========================================================================
-    // Two columns, filled left-then-right.
-    const auto totalRows = numDebugControls + numDebugChoiceControls;
-    const auto rowsInLeftColumn = (totalRows + 1) / 2;
-
-    auto leftColumn = area.removeFromLeft (area.getWidth() / 2 - 12);
-    area.removeFromLeft (24); // gutter
-    auto rightColumn = area;
-
-    auto rowIndex = 0;
-
-    const auto nextRow = [&] () -> juce::Rectangle<int>
-    {
-        auto& column = rowIndex++ < rowsInLeftColumn ? leftColumn : rightColumn;
-        auto row = column.removeFromTop (rowHeight);
-        column.removeFromTop (rowGap);
-        return row;
-    };
-
-    for (auto& control : debugControls)
-    {
-        auto row = nextRow();
-        control.label.setBounds (row.removeFromLeft (labelWidth));
-        control.slider.setBounds (row);
-    }
-
-    for (auto& control : debugChoiceControls)
-    {
-        auto row = nextRow();
-        control.label.setBounds (row.removeFromLeft (labelWidth));
-        control.comboBox.setBounds (row);
-    }
+    panel.setTransform (juce::AffineTransform::scale (scale).translated (offsetX, offsetY));
+    panel.setBounds (0, 0, SynthPanel::designWidth, SynthPanel::designHeight); // pre-transform bounds
 }

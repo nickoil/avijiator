@@ -452,8 +452,16 @@ during step 3, and reused unchanged here).
 it's a comparatively large unverified surface (`MidiKeyboardStateListener`,
 click-position velocity, scrolling) to bridge into the FIFO — for something item 6
 throws away entirely. Reusing known-good code beats introducing a new unverified API
-for disposable scaffolding. Fixed range (C3-C4), no octave UI of its own; that's what
-QWERTY's shift keys are for.
+for disposable scaffolding. Fixed range (C3-C4) at the time of writing.
+
+**Update, item 6 UI pass:** the real (non-disposable) on-screen keyboard's key
+captions show the matching QWERTY letter, which only stays honest if both
+inputs share one octave shift. So `SynthPanel` grew its own Octave Up/Down
+buttons next to the keyboard, but they don't keep separate state - they call
+into `QwertyNoteInput::octaveUp()/octaveDown()` (the same clamped adjustment
+comma/period make) and `MainComponent` mirrors the result back with
+`SynthPanel::setOctaveShift()`, so a button click and a comma/period press
+move the same one shift.
 
 ---
 

@@ -94,14 +94,37 @@ Build/validate everything here before touching Android.
       listening tests in arpeggiator-design.md section 12 (division timing,
       up-down endpoints, hold rule "feel", whether it's in the SH-101 family)
       are the user's to run.
-- [ ] **6. UI pass** — knobs/controls for what's built so far, mouse-driven;
-      keep touch-first layout decisions in mind even though untested. Consider
-      a Claude Design canvas mockup first to iterate on SH-101 panel layout
-      and touch-target sizing cheaply before hand-coding it in JUCE — it's a
-      visual reference only (HTML/CSS artboard), not JUCE code, so nothing
-      transfers directly; still hand-write every `Slider`/`LookAndFeel`
-      against it. Not useful before item 6 — the debug sliders used for
-      items 2-5 are explicit throwaway scaffolding
+- [x] **6. UI pass** — knobs/controls for what's built so far, mouse-driven;
+      keep touch-first layout decisions in mind even though untested.
+      Design + build order: [ui-design.md](ui-design.md); settled decisions
+      recorded in architecture.md's "Item 6 — instrument panel" section.
+      All 8 build steps done: `PanelLookAndFeel` (flat drawing, no
+      gradients/bevels), `ParameterControls.h` (knob/choice/toggle spec
+      structs + attach helpers, carried forward from the items 2-5 pattern),
+      `PanelSection`, and `SynthPanel` composing all seven sections (VCO,
+      VCF, ENV, LFO, KEYBOARD, ARP, OUTPUT) plus a reserved empty SEQ strip
+      for item 7, at a fixed 1280x660 design size scaled onto the real
+      window via an `AffineTransform` on the panel child. The Claude Design
+      canvas mockup (desktop + phone-landscape artboards) came first, per
+      the doc's step 1. All 27 parameters (19 knobs, 6 combo boxes, 2
+      toggles) present and wired; the six `jassert` self-tests from items
+      4-5 survived the rewrite intact. One real defect found and fixed along
+      the way: once `SynthPanel` covered the whole window, a click no longer
+      landed on `MainComponent` by accident, so it stopped grabbing keyboard
+      focus and QWERTY note input silently died after the first click —
+      fixed with an explicit `visibilityChanged()` override.
+      **Not verified this session**: a Debug + Release rebuild was skipped
+      because `Avijiator.exe` was already running (user's own manual test)
+      and locking the link step — Debug compiled clean up to that point
+      (Main.cpp, MainComponent.cpp, SynthPanel.cpp all built) but the link
+      and the Release config weren't re-confirmed here. Worth a rebuild
+      before relying on "builds clean".
+      **Human-only, not yet done**: whether the panel *looks* right and the
+      section grouping is the one that makes sense to play from; whether the
+      76px knobs (derived from a 48dp Android touch target, see
+      architecture.md) are actually big enough to hit on a phone — no touch
+      hardware exists in Stage A, real answer is Stage B item 9; whether the
+      arrangement reads as being in the SH-101 family.
 - [ ] **7. Step sequencer (phase 2)** — 16-step (page-able) pattern, per-step
       pitch/gate/accent/slide, shared clock/trigger plumbing with the arp.
       **Future consideration, not yet scoped into this item**: per-step
@@ -137,6 +160,81 @@ Build/validate everything here before touching Android.
       carries DC of `2w-1`; real hardware AC-couples it away. Harmless with a
       static pulse width, but **needed before item 3 sweeps PWM with the
       LFO**, or the moving DC thumps
+
+### Tempo sync (not numbered — no reordering)
+
+- [ ] **Internal master tempo for LFO/arp/glide** — one master BPM that LFO
+      rate and arp tempo (and, later, the step sequencer) can each
+      optionally lock to, with its own division/ratio so the rate scales
+      proportionally rather than being forced identical. Nothing exists
+      today: each tempo-driven consumer (currently only `Arpeggiator`) owns
+      an independent `StepClock` and reads its own raw BPM atomic every
+      block. Design rationale and the "this is not host sync" distinction
+      are in architecture.md's "Tempo sync" section.
+      **Still open:**
+      (a) does each existing rate atom (`arpTempoBpm`, `lfoRateHz`) get a
+      paired new sync-enable + division field, leaving the raw value as the
+      "sync off" fallback — that's what "each with its own division"
+      implies, but wants stating explicitly before it's built;
+      (b) does glide time meaningfully lock to tempo at all, given it's a
+      one-shot transition rather than a periodic rate — two different
+      features hide under that one idea ("glide takes 1 beat" vs. "glide's
+      seconds value scales with tempo") and neither is committed to yet;
+      (c) build the LFO/arp half now, or wait for item 7 (step sequencer) so
+      the shared-clock concept only gets factored out once, per
+      `StepClock`'s own comment about when that becomes worth doing
+
+### Settings persistence (not numbered — no reordering)
+
+- [ ] **Save/reload all synth settings, including a preset system** —
+      nothing is persisted anywhere in this app today: `createStateXml`,
+      `ApplicationProperties`, `PropertiesFile`, `ValueTree` all return zero
+      hits in `Source/`, and `juce_data_structures` isn't linked yet (same
+      gap already flagged in the device-settings item above — linking it
+      once serves both). Distinct from, and independent of, that
+      device-settings item (audio/MIDI device selection, much narrower) —
+      confirmed independent by ui-design.md's own "out of scope" note.
+      A preset needs to hold every `VoiceParameters` atomic plus **arp
+      performance state**: the latched Hold-mode chord (`Arpeggiator`'s
+      `latched`/`numLatched`/`latchAwaitingFreshChord`, see
+      arpeggiator-design.md section 8) — e.g. a preset that ships already
+      arpeggiating a C-major chord — not raw live key state, which is
+      transient and doesn't make sense to "restore".
+      A curated collection of good presets could ship permanently with the
+      app.
+      **Still open:** (a) preset file format — `juce::ValueTree` + XML is
+      the natural JUCE-idiomatic pick given `juce_data_structures`, but
+      undecided; (b) where shipped presets physically live — embedded as
+      `BinaryData` (the same pattern `AvijiatorFonts` already uses,
+      immutable with the .exe) vs. written to a user folder at first launch
+      (user-editable in place); (c) if tempo sync (above) lands first, its
+      new sync-enable/division fields need to be part of what a preset
+      saves — not a blocker, just needs revisiting in whichever order these
+      two get built
+
+### WAV output / recording (not numbered — no reordering)
+
+- [ ] **Record the live audio output to a WAV file** — nothing exists
+      today: `juce_audio_formats` (and `WavAudioFormat`/`AudioFormatWriter`)
+      is already linked in `CMakeLists.txt` but has zero uses anywhere in
+      `Source/` — this would be its first consumer. Tap point is
+      `MainComponent::getNextAudioBlock`, where `renderVoiceBlock` fills the
+      mono buffer before it's fanned out to output channels. **Cannot call
+      `AudioFormatWriter::write()` directly in the audio callback** —
+      CLAUDE.md's hard constraints rule out file I/O there. The pattern to
+      follow: `AudioFormatWriter::ThreadedWriter` (lock-free ring buffer +
+      background thread doing the real I/O) — the same shape as this
+      codebase's existing `NoteEventFifo` (`Source/DSP/NoteEvent.h`), just
+      for audio samples instead of note events, and in the opposite
+      direction. Start/stop would sit alongside the existing
+      `prepareToPlay`/`releaseResources` pair.
+      This is **live recording** ("what's currently playing, start/stop
+      like a tape recorder") — the synth is played live via MIDI/QWERTY/
+      on-screen keyboard with no timeline or song data to bounce, so an
+      offline/faster-than-realtime render doesn't apply yet (would wait on
+      item 7, the step sequencer, existing first). **Still open:** whether
+      this needs an on-screen record button (item 6/UI-pass territory) now,
+      or stays a backend-only capability until picked up
 
 ### App housekeeping (not numbered — no reordering)
 

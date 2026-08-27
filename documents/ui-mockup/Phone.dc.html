@@ -1,0 +1,257 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    :root{
+      --bg:#14161A; --panel:#1C2026; --sect:#22272E; --outline:#2E353F;
+      --track:#333B45; --accent:#4EC9C0; --accent2:#E0A458;
+      --text:#E6EAF0; --dim:#8A94A6; --keyw:#C9D1DC; --keyb:#2A313A;
+      --well:#1A1E24;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:#0B0C0F;color:var(--text);
+         font-family:'IBM Plex Sans','Segoe UI',system-ui,sans-serif}
+
+    .stage{width:1280px;padding:34px;display:flex;flex-direction:column;gap:22px}
+    .lead{max-width:900px}
+    .lead h1{font-size:15px;font-weight:600;letter-spacing:.04em;margin:0 0 6px}
+    .lead p{font-size:12px;line-height:1.7;color:var(--dim);margin:0}
+    .lead b{color:var(--text);font-weight:500}
+    code{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--accent);
+         background:rgba(78,201,192,.08);padding:1px 5px;border-radius:3px;font-size:11px}
+
+    /* ---- phone frame: Pixel-landscape proportions, dp-space, 914x411 ---- */
+    .frame-wrap{display:flex;align-items:center;gap:26px}
+    .bezel{width:938px;height:435px;background:#050608;border-radius:26px;
+           padding:12px;flex-shrink:0;position:relative;
+           box-shadow:0 20px 60px rgba(0,0,0,.55)}
+    .screen{width:914px;height:411px;background:#000;border-radius:16px;
+            overflow:hidden;position:relative}
+    .camera{position:absolute;left:50%;top:8px;width:5px;height:5px;border-radius:50%;
+            background:#1a1c20;transform:translateX(-50%)}
+
+    /* letterbox = unused strip either side once the 1280x660 panel is
+       scaled to fit inside 914x411 (scale factor .623 -> 797x411) */
+    .letter{position:absolute;top:0;bottom:0;width:58px;background:#0B0C0F}
+    .letter.l{left:0} .letter.r{right:0}
+    .letter-tick{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(90deg);
+                 font-family:'IBM Plex Mono',monospace;font-size:8px;color:#3A414C;
+                 letter-spacing:.12em;white-space:nowrap}
+
+    .scaled{position:absolute;left:58px;top:0;
+            width:1280px;height:660px;
+            transform:scale(0.623);transform-origin:top left}
+
+    /* --- panel, identical tokens/markup to Main.dc.html, reused at scale --- */
+    .panel{width:1280px;height:660px;background:var(--panel);
+           padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+    .hdr{height:36px;display:flex;align-items:center;gap:14px;flex-shrink:0}
+    .mark{font-size:19px;font-weight:600;letter-spacing:.20em}
+    .mark em{font-style:normal;color:var(--accent)}
+    .tag{font-size:10px;letter-spacing:.20em;color:var(--dim);padding-top:2px}
+    .hdr-sp{flex-grow:1}
+    .btn{height:28px;padding:0 14px;border:1px solid var(--outline);border-radius:6px;
+         background:var(--well);color:var(--text);font-size:11px;letter-spacing:.10em;
+         display:flex;align-items:center;justify-content:center}
+    .row{display:flex;gap:16px;height:158px;flex-shrink:0}
+    .section{background:var(--sect);border:1px solid var(--outline);border-radius:10px;
+             padding:8px 8px 10px;display:flex;flex-direction:column;min-width:0}
+    .section-title{font-size:10px;letter-spacing:.17em;color:var(--dim);padding:1px 3px 7px;flex-shrink:0}
+    .cells{display:grid;gap:0;flex-grow:1;align-items:start}
+    .cell{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+    .cell-label{font-size:10px;letter-spacing:.09em;color:var(--dim);white-space:nowrap}
+    .cell-val{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text);white-space:nowrap}
+    .cell-val.zero{color:var(--dim)}
+    .knob{width:76px;height:76px;position:relative;flex-shrink:0;
+          background:conic-gradient(from 225deg,var(--accent) 0deg,
+            var(--accent) calc(var(--v) * 270deg),var(--track) calc(var(--v) * 270deg),
+            var(--track) 270deg,transparent 270deg);border-radius:50%}
+    .knob.alt{background:conic-gradient(from 225deg,var(--accent2) 0deg,
+            var(--accent2) calc(var(--v) * 270deg),var(--track) calc(var(--v) * 270deg),
+            var(--track) 270deg,transparent 270deg)}
+    .cap{position:absolute;inset:9px;border-radius:50%;background:var(--well);border:1px solid var(--outline)}
+    .ptr{position:absolute;left:50%;top:5px;width:2px;height:13px;margin-left:-1px;
+         background:var(--accent);border-radius:1px;
+         transform-origin:1px 24px;transform:rotate(calc(-135deg + var(--v) * 270deg))}
+    .knob.alt .ptr{background:var(--accent2)}
+    .slot{height:76px;display:flex;align-items:center;justify-content:center}
+    .combo{width:86px;height:32px;border:1px solid var(--outline);border-radius:6px;
+           background:var(--well);color:var(--text);font-size:12px;
+           display:flex;align-items:center;justify-content:center}
+    .stack{height:76px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+    .tog{width:86px;height:32px;border:1px solid var(--outline);border-radius:6px;
+         background:var(--well);color:var(--dim);font-size:10px;letter-spacing:.11em;
+         display:flex;align-items:center;justify-content:center;gap:7px}
+    .tog.on{border-color:var(--accent2);color:var(--accent2);background:rgba(224,164,88,.13)}
+    .dot{width:7px;height:7px;border-radius:50%;background:var(--track)}
+    .tog.on .dot{background:var(--accent2)}
+    .seq{height:90px;border:1px dashed var(--outline);border-radius:10px;
+         display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;flex-shrink:0}
+    .seq-t{font-size:10px;letter-spacing:.20em;color:var(--dim)}
+    .seq-s{font-size:11px;color:#5C6675}
+    .bot{height:114px;display:flex;gap:24px;align-items:stretch;flex-shrink:0}
+    .kbd{position:relative;height:84px;flex-grow:1;max-width:760px;
+         background:var(--well);border:1px solid var(--outline);border-radius:8px;padding:5px;display:flex;gap:3px}
+    .wk{flex-grow:1;background:var(--keyw);border-radius:0 0 5px 5px}
+    .bk{position:absolute;top:5px;width:7.4%;height:50px;background:var(--keyb);
+        border:1px solid #10141A;border-radius:0 0 4px 4px;z-index:2}
+    .side{display:flex;flex-direction:column;justify-content:center;gap:9px;flex-shrink:0;width:220px}
+
+    .meas{width:938px;font-size:11px;line-height:1.8;color:var(--dim)}
+    .meas b{color:var(--text)}
+    .verdict{width:938px;margin-top:2px;padding:14px 16px;border-radius:8px;
+             background:var(--sect);border:1px solid var(--outline);font-size:12px;
+             line-height:1.7;color:var(--dim)}
+    .verdict b{color:var(--accent)}
+  </style>
+</helmet>
+
+<div class="stage">
+
+  <div class="lead">
+    <h1>Fixed-canvas scaling &mdash; Pixel-landscape check</h1>
+    <p>
+      Same <code>1280&times;660</code> desktop canvas from <b>Main</b>, placed
+      inside a <b>914&times;411dp</b> frame &mdash; a Pixel 8 in landscape,
+      density-normalised &mdash; using the exact rule from
+      <code>documents/ui-design.md</code> &sect;3:
+      <code>scale&nbsp;=&nbsp;min(914/1280,&nbsp;411/660)&nbsp;=&nbsp;0.623</code>.
+      No layout change, no touch-size change &mdash; this is only checking
+      whether the leftover width reads as a problem.
+    </p>
+  </div>
+
+  <div class="frame-wrap">
+    <div class="bezel">
+      <div class="screen">
+        <div class="camera"></div>
+        <div class="letter l"><div class="letter-tick">58px UNUSED</div></div>
+        <div class="letter r"><div class="letter-tick">58px UNUSED</div></div>
+        <div class="scaled">
+          <div class="panel">
+            <div class="hdr">
+              <div class="mark">AVIJI<em>A</em>TOR</div>
+              <div class="tag">MONOPHONIC SYNTHESIZER</div>
+              <div class="hdr-sp"></div>
+              <div class="btn">AUDIO SETTINGS</div>
+            </div>
+
+            <div class="row">
+              <div class="section" style="flex:5 1 0">
+                <div class="section-title">VCO</div>
+                <div class="cells" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+                  <div class="cell"><div class="cell-label">SAW</div><div class="knob" style="--v:.85"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">0.85</div></div>
+                  <div class="cell"><div class="cell-label">PULSE</div><div class="knob" style="--v:.40"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">0.40</div></div>
+                  <div class="cell"><div class="cell-label">WIDTH</div><div class="knob" style="--v:.417"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">42 %</div></div>
+                  <div class="cell"><div class="cell-label">SUB</div><div class="knob" style="--v:.60"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">0.60</div></div>
+                  <div class="cell"><div class="cell-label">NOISE</div><div class="knob" style="--v:.05"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">0.05</div></div>
+                </div>
+              </div>
+              <div class="section" style="flex:3 1 0">
+                <div class="section-title">VCF</div>
+                <div class="cells" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+                  <div class="cell"><div class="cell-label">CUTOFF</div><div class="knob" style="--v:.602"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">1.20 k</div></div>
+                  <div class="cell"><div class="cell-label">RESONANCE</div><div class="knob" style="--v:.72"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">0.72</div></div>
+                  <div class="cell"><div class="cell-label">ENV AMT</div><div class="knob" style="--v:.425"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">+3.4 oct</div></div>
+                </div>
+              </div>
+              <div class="section" style="flex:5 1 0">
+                <div class="section-title">ENVELOPE &mdash; SHARED</div>
+                <div class="cells" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+                  <div class="cell"><div class="cell-label">ATTACK</div><div class="knob" style="--v:.06"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">5 ms</div></div>
+                  <div class="cell"><div class="cell-label">DECAY</div><div class="knob" style="--v:.30"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">350 ms</div></div>
+                  <div class="cell"><div class="cell-label">SUSTAIN</div><div class="knob" style="--v:.15"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">0.15</div></div>
+                  <div class="cell"><div class="cell-label">RELEASE</div><div class="knob" style="--v:.24"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">220 ms</div></div>
+                  <div class="cell"><div class="cell-label">DESTINATION</div><div class="slot"><div class="combo">Both</div></div><div class="cell-val zero">VCF + VCA</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="section" style="flex:4 1 0">
+                <div class="section-title">LFO</div>
+                <div class="cells" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+                  <div class="cell"><div class="cell-label">RATE</div><div class="knob" style="--v:.45"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">5.20 Hz</div></div>
+                  <div class="cell"><div class="cell-label">WAVEFORM</div><div class="slot"><div class="combo">Triangle</div></div><div class="cell-val zero">TRI/SQR/S&amp;H</div></div>
+                  <div class="cell"><div class="cell-label">&rarr; PITCH</div><div class="knob" style="--v:0"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val zero">0.00</div></div>
+                  <div class="cell"><div class="cell-label">&rarr; CUTOFF</div><div class="knob" style="--v:.138"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">+1.1 oct</div></div>
+                </div>
+              </div>
+              <div class="section" style="flex:3 1 0">
+                <div class="section-title">KEYBOARD</div>
+                <div class="cells" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+                  <div class="cell"><div class="cell-label">GLIDE</div><div class="knob" style="--v:.09"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">450 ms</div></div>
+                  <div class="cell"><div class="cell-label">MODE</div><div class="slot"><div class="combo">Legato</div></div><div class="cell-val zero">no retrigger</div></div>
+                  <div class="cell"><div class="cell-label">PRIORITY</div><div class="slot"><div class="combo">Last</div></div><div class="cell-val zero">last/highest</div></div>
+                </div>
+              </div>
+              <div class="section" style="flex:5 1 0">
+                <div class="section-title">ARPEGGIATOR</div>
+                <div class="cells" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+                  <div class="cell"><div class="cell-label">&nbsp;</div><div class="stack"><div class="tog on"><div class="dot"></div>ARP ON</div><div class="tog"><div class="dot"></div>HOLD</div></div><div class="cell-val zero">&nbsp;</div></div>
+                  <div class="cell"><div class="cell-label">PATTERN</div><div class="slot"><div class="combo">Up-Down</div></div><div class="cell-val zero">5 patterns</div></div>
+                  <div class="cell"><div class="cell-label">DIVISION</div><div class="slot"><div class="combo">1/16</div></div><div class="cell-val zero">1/4&hellip;1/32</div></div>
+                  <div class="cell"><div class="cell-label">TEMPO</div><div class="knob alt" style="--v:.386"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">128.0 BPM</div></div>
+                  <div class="cell"><div class="cell-label">GATE</div><div class="knob alt" style="--v:.556"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">55 %</div></div>
+                </div>
+              </div>
+              <div class="section" style="flex:1 1 0">
+                <div class="section-title">OUT</div>
+                <div class="cells" style="grid-template-columns:repeat(1,minmax(0,1fr))">
+                  <div class="cell"><div class="cell-label">LEVEL</div><div class="knob" style="--v:.62"><div class="cap"><div class="ptr"></div></div></div><div class="cell-val">0.62</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="seq"><div class="seq-t">STEP SEQUENCER</div><div class="seq-s">reserved &mdash; item 7</div></div>
+
+            <div class="bot">
+              <div class="kbd">
+                <div class="wk"></div><div class="wk"></div><div class="wk"></div><div class="wk"></div>
+                <div class="wk"></div><div class="wk"></div><div class="wk"></div><div class="wk"></div>
+                <div class="bk" style="left:8.75%"></div><div class="bk" style="left:21.25%"></div>
+                <div class="bk" style="left:46.25%"></div><div class="bk" style="left:58.75%"></div><div class="bk" style="left:71.25%"></div>
+              </div>
+              <div class="side"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="meas">
+      <b>914&times;411dp</b> frame &middot; panel scales to <b>797&times;411</b><br>
+      leftover <b>117dp</b> total &middot; <b>58.5dp</b> each side &middot;
+      <b>12.8%</b> of screen width unused<br>
+      knob at physical touch size: <b>&asymp;47.4dp</b> diameter (&sect;3 derivation)
+    </div>
+  </div>
+
+  <div class="verdict">
+    <b>Reading this against &sect;3's compromise:</b> the letterbox is visible
+    but narrow &mdash; about the width of a scroll-bar gutter, not a wasted
+    third of the screen &mdash; and it lands symmetrically on both sides
+    rather than as one dead strip. Nothing here argues for widening the
+    1280&times;660 canvas before the JUCE build starts; the empty SEQ strip
+    at the bottom is the natural place to spend extra width later if item 7
+    wants it. Worth a second look once a step-grid actually occupies that
+    strip &mdash; a populated SEQ row may want the reserved space back.
+  </div>
+
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

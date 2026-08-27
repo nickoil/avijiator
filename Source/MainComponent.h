@@ -1,8 +1,5 @@
 #pragma once
 
-#include <array>
-#include <functional>
-
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -13,27 +10,23 @@
 #include "DSP/SynthVoice.h"
 #include "NoteRouter.h"
 #include "QwertyNoteInput.h"
+#include "UI/SynthPanel.h"
 
 //==============================================================================
 /*
     Top-level content component.
 
-    Item 2 (oscillator + filter core) complete: four sources -> 24dB resonant
-    lowpass -> VCA, nine debug controls. This scaffolding is explicitly
-    throwaway - item 6 is the real UI pass and none of it survives that.
-    See documents/dsp-voice-design.md for how it was built.
+    Item 6 (UI pass, documents/ui-design.md) replaced every widget that used
+    to live here directly with SynthPanel, the real instrument panel built at
+    a fixed design size. This class now owns only what SynthPanel has no
+    business owning: the audio callbacks, the MIDI callback, keyStateChanged /
+    focusLost, showAudioSettings (needs the AudioDeviceManager), the six
+    Debug self-tests, and the scale transform that maps SynthPanel's fixed
+    canvas onto whatever the real window is (documents/ui-design.md section
+    5's "The scaling, in MainComponent::resized()").
 
-    Item 3 (envelope + LFO): shared ADSR (routable VCF/VCA/Both) plus a
-    triangle/square/S&H LFO (routable pitch and/or cutoff, independently).
-
-    Item 4 (note handling): playable from MIDI hardware, the computer
-    keyboard, and an on-screen keyboard - all three through NoteRouter's
-    FIFOs and the held-note stack, so priority, glide and legato behave
-    identically whichever one is used. The two latching note buttons remain,
-    since a mouse can't hold two momentary keys at once.
-
-    All of this scaffolding is explicitly throwaway; item 6 is the real UI
-    pass. See documents/note-handling-design.md.
+    Nothing in the signal path changed to get here - see that document's
+    opening line, "this item adds zero code to getNextAudioBlock".
 */
 class MainComponent final : public juce::AudioAppComponent,
                              private juce::MidiInputCallback
@@ -63,6 +56,18 @@ public:
     void focusLost (FocusChangeType cause) override;
 
 private:
+    // Grabs keyboard focus the first time this component is actually shown.
+    // Before SynthPanel existed, MainComponent's own background showed
+    // through the gaps between the throwaway sliders, so a click there
+    // landed directly on MainComponent (which wants focus) and grabbed it
+    // for free. SynthPanel now covers the entire window at 1:1 scale, so
+    // EVERY click lands on the panel or one of its children - none of which
+    // want focus - and a click can no longer grab it by accident. Without
+    // this override the computer keyboard would never play a note again,
+    // silently: keyStateChanged simply never fires.
+    void visibilityChanged() override;
+
+
     //==============================================================================
     // Fires on the MIDI THREAD - not the message thread, and not the audio
     // thread. That's precisely why NoteRouter keeps a second FIFO: each queue
@@ -73,117 +78,17 @@ private:
 
     void enableAllMidiInputs();
 
+    // Opens JUCE's device selector. Without it the app just takes whatever
+    // JUCE defaults to - on Windows that's WASAPI shared mode, whose latency
+    // is high enough to get in the way of playing. ASIO is compiled in
+    // (JUCE_ASIO), so an ASIO driver can be selected here. Also carries the
+    // MIDI input device list. The button that fires this now lives on
+    // SynthPanel; it only reports the click (panel.onAudioSettingsClicked),
+    // since the panel has no reason to reach for the AudioDeviceManager.
+    void showAudioSettings();
+
 private:
     //==============================================================================
-    // Throwaway auditioning scaffolding. Item 6 is the real UI pass and none of
-    // this survives it - deliberately unstyled, and driven by one spec table
-    // plus one loop so later steps add a row rather than more copy-paste.
-    struct DebugControl
-    {
-        juce::Slider slider;
-        juce::Label label;
-    };
-
-    struct DebugControlSpec
-    {
-        const char* name;
-        double minimum, maximum, defaultValue;
-        bool storeAsLog2;                             // true for Hz-valued controls
-        std::atomic<float> VoiceParameters::* target;
-    };
-
-    // Sizing the definition to this count makes the compiler enforce that the
-    // table and the array stay in step.
-    static constexpr int numDebugControls = 19;
-    static const DebugControlSpec debugControlSpecs[numDebugControls];
-
-    // Discrete switches (Envelope Destination, later LFO Waveform) don't fit
-    // the float-slider table above - a small parallel table rather than
-    // complicating that one with a variant type.
-    struct DebugChoice
-    {
-        juce::ComboBox comboBox;
-        juce::Label label;
-    };
-
-    struct DebugChoiceSpec
-    {
-        const char* name;
-        const char* const* choices;
-        int numChoices;
-        int defaultIndex;
-        std::atomic<int> VoiceParameters::* target;
-    };
-
-    static constexpr int numDebugChoiceControls = 8;
-    static const DebugChoiceSpec debugChoiceSpecs[numDebugChoiceControls];
-
-    // A button that reports press AND release, not just "clicked".
-    //
-    // juce::Button::onStateChange would be the shorter route, but its exact
-    // firing behaviour isn't something to assume without reading JUCE sources
-    // - overriding mouseDown/mouseUp is unambiguous, since Component's
-    // mouse-capture behaviour (mouseUp still reaches the component that
-    // started the drag, even outside its bounds) is foundational and certain.
-    //
-    // Introduced for item 3's Gate button, then reused unchanged by the note
-    // buttons and the on-screen keyboard - which is why it was worth
-    // generalising rather than leaving Gate-specific.
-    struct MomentaryButton final : public juce::TextButton
-    {
-        std::function<void (bool)> onPressedChanged;
-
-        void mouseDown (const juce::MouseEvent& e) override
-        {
-            juce::TextButton::mouseDown (e);
-            if (onPressedChanged != nullptr)
-                onPressedChanged (true);
-        }
-
-        void mouseUp (const juce::MouseEvent& e) override
-        {
-            juce::TextButton::mouseUp (e);
-            if (onPressedChanged != nullptr)
-                onPressedChanged (false);
-        }
-    };
-
-    // Two note triggers a fifth apart, for exercising glide and
-    // legato/retrigger with the mouse alone.
-    //
-    // They LATCH rather than being momentary - a mouse has one pointer, so
-    // momentary buttons could never be held together, and overlapping notes
-    // are the entire point of those tests. Kept even now that QWERTY and MIDI
-    // exist, since neither of those helps if you only have a mouse to hand.
-    struct NoteButtonSpec { const char* name; int midiNoteNumber; };
-
-    static constexpr int numNoteButtons = 2;
-    static const NoteButtonSpec noteButtonSpecs[numNoteButtons];
-
-    //==============================================================================
-    // A clickable one-octave keyboard, C3 to C4.
-    //
-    // Hand-rolled from MomentaryButton rather than using
-    // juce::MidiKeyboardComponent. That widget is real and capable, but it's a
-    // large unverified surface (its own listener interface, click-position
-    // velocity, scrolling) to bridge into the FIFO - for scaffolding item 6
-    // throws away entirely. Reusing a pattern already proven by a successful
-    // build beats introducing a new one here.
-    //
-    // MOMENTARY, unlike the two latching note buttons: click-and-hold is the
-    // natural behaviour for a piano key, and a mouse can only press one at a
-    // time regardless. Overlapping notes come from QWERTY or the latching
-    // buttons.
-    //
-    // Fixed range, deliberately NOT following QWERTY's octave shift: a shift
-    // while a key was held would make the note-off carry a different note
-    // number than its note-on, and the note would stick on.
-    struct KeyboardKeySpec { const char* name; int semitoneOffset; bool isBlackKey; };
-
-    static constexpr int numKeyboardKeys = 13;
-    static constexpr int keyboardBaseNoteNumber = 48; // C3, same as QWERTY's base
-    static const KeyboardKeySpec keyboardKeySpecs[numKeyboardKeys];
-
     SynthVoice voice;
 
     // Owns the event FIFOs and the note-priority stack. Input sources push
@@ -204,22 +109,13 @@ private:
     // documents/arpeggiator-design.md section 7.
     bool arpWasOn = false;
 
-    // Opens JUCE's device selector. Without it the app just takes whatever
-    // JUCE defaults to - on Windows that's WASAPI shared mode, whose latency
-    // is high enough to get in the way of playing. ASIO is compiled in
-    // (JUCE_ASIO), so an ASIO driver can be selected here. Also carries the
-    // MIDI input device list.
-    void showAudioSettings();
-    juce::TextButton audioSettingsButton;
-
-    std::array<DebugControl, numDebugControls> debugControls;
-    std::array<DebugChoice, numDebugChoiceControls> debugChoiceControls;
-    std::array<MomentaryButton, numNoteButtons> noteButtons;
-
-    // The note buttons LATCH rather than being momentary - see the comment on
-    // their wiring in the constructor. Message-thread state only.
-    std::array<bool, numNoteButtons> noteButtonLatched {};
-    std::array<MomentaryButton, numKeyboardKeys> keyboardButtons;
+    // The real instrument panel, at its fixed design size - see
+    // documents/ui-design.md sections 3 and 5. Declared after voice and
+    // router: its constructor takes voice.getParameters() by reference and
+    // its note-event callback closes over router, so both must already
+    // exist. resized() below is the only place this class knows the panel's
+    // size differs from the window's.
+    SynthPanel panel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

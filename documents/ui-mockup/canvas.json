@@ -1,0 +1,10 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1280, "h": 660 },
+    { "file": "Phone.dc.html", "x": 0, "y": 760, "w": 1280, "h": 620 }
+  ],
+  "annotations": [
+    { "id": "brief", "x": 0, "y": -110, "w": 560, "text": "Avijiator — item 6 UI pass mockup\nSpec: documents/ui-design.md §2-4\nVisual reference only — nothing here transfers as code; every Slider/LookAndFeel is hand-written in JUCE against this." }
+  ],
+  "launch": { "view": "canvas" }
+}

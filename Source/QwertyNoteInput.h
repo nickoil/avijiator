@@ -19,6 +19,14 @@
     Deliberately NOT Z/X for the octave shift, even though that pairing is
     common elsewhere - both are note keys in this layout.
 
+    WINDOWS VK QUIRK: isKeyCurrentlyDown() takes a raw virtual-key code, not
+    an ASCII character. Letters/digits get away with passing the character
+    anyway because VK_A..VK_Z and VK_0..VK_9 happen to equal 'A'..'Z' and
+    '0'..'9' - but ',' (0x2C) and '.' (0x2E) collide with VK_SNAPSHOT (Print
+    Screen) and VK_DELETE respectively, so passing the raw characters silently
+    polls the wrong keys. See octaveDownKeyCode/octaveUpKeyCode below, and
+    https://forum.juce.com/t/weird-keypress-keycode-quirks-in-windows-and-linux/59298.
+
     KEY-REPEAT IMMUNE BY CONSTRUCTION. Whether JUCE's key callbacks re-fire on
     the OS's auto-repeat isn't something we've verified, so this doesn't
     depend on it either way: it keeps its own record of which keys are held
@@ -45,6 +53,14 @@ public:
     void releaseAllHeldKeys();
 
     int getOctaveShift() const noexcept { return octaveShift; }
+
+    // Same clamped +/-1 adjustment the , and . keys make each poll, exposed
+    // so SynthPanel's on-screen Octave Up/Down buttons drive this ONE piece
+    // of state rather than keeping an unsynchronised copy of their own - the
+    // on-screen keyboard's letter captions promise "same note as this QWERTY
+    // key," which only stays true if both share one shift.
+    void octaveUp() noexcept { adjustOctaveShift (1); }
+    void octaveDown() noexcept { adjustOctaveShift (-1); }
 
 private:
     struct KeyMapping
@@ -73,10 +89,17 @@ private:
     static constexpr int minOctaveShift = -2;
     static constexpr int maxOctaveShift = 4;
 
+   #if JUCE_WINDOWS
+    // VK_OEM_COMMA / VK_OEM_PERIOD - see the WINDOWS VK QUIRK note above.
+    static constexpr int octaveDownKeyCode = 0xBC;
+    static constexpr int octaveUpKeyCode = 0xBE;
+   #else
     static constexpr int octaveDownKeyCode = ',';
     static constexpr int octaveUpKeyCode = '.';
+   #endif
 
     void emit (NoteEvent::Type type, std::uint8_t noteNumber, float velocity);
+    void adjustOctaveShift (int delta) noexcept;
 
     std::array<KeyState, numMappedKeys> keyStates {};
     bool octaveDownWasHeld = false;

@@ -1,0 +1,210 @@
+#pragma once
+
+#include <cmath>
+#include <functional>
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "../DSP/VoiceParameters.h"
+#include "PanelLookAndFeel.h"
+
+//==============================================================================
+/*
+    documents/ui-design.md section 5's spec-table pattern, widened from the
+    throwaway scaffolding's two spec kinds (MainComponent.cpp's
+    DebugControlSpec/DebugChoiceSpec) to three. Same idea as those: one table
+    row per control, one attach() call per row, so PanelSection (step 4) and
+    SynthPanel (step 5) add a control by adding a row rather than more
+    copy-paste.
+
+    Every attach helper owns ALL of a widget's configuration - range, skew,
+    suffix, the onValueChange/onChange callback, the keyboard-focus flag, and
+    the seed call that fires the callback once at construction so the widget
+    and its atomic cannot disagree at startup (easy to forget, silent when
+    forgotten - see section 6.2). PanelSection's job is strictly layout: it
+    positions the already-fully-configured widget, never restyles it.
+*/
+
+//==============================================================================
+// A rotary knob. Covers all 19 of item 6's float controls, including the
+// time-valued ones (Attack/Decay/Release, Glide) and Cutoff.
+struct KnobSpec
+{
+    const char* name;
+    double min, max, def;
+
+    // Cutoff is the only control with storeAsLog2 = true. skewMidpoint is
+    // orthogonal to that - Attack/Decay/Release/Glide want the skew (short
+    // times aren't crammed into the first few pixels of travel) without
+    // storing as log2, since VoiceParameters keeps their seconds values
+    // linear. 0 = no skew.
+    bool storeAsLog2;
+    double skewMidpoint;
+
+    const char* suffix; // e.g. " Hz", " s" - nullptr/"" for none
+    std::atomic<float> VoiceParameters::* target;
+};
+
+// A combo box. Covers Envelope Destination, LFO Waveform, Glide Mode, Note
+// Priority, Arp Pattern, Arp Division.
+struct ChoiceSpec
+{
+    const char* name;
+    const char* const* choices;
+    int numChoices;
+    int defaultIndex;
+    std::atomic<int> VoiceParameters::* target;
+};
+
+// A toggle. Covers Arp On and Arp Hold - two ComboBoxes in the throwaway
+// scaffolding, two ToggleButtons here (documents/ui-design.md section 2).
+// Both still store 0/1 into the same std::atomic<int>, so nothing downstream
+// of VoiceParameters notices the widget change.
+struct ToggleSpec
+{
+    const char* name;
+    int defaultValue;
+    std::atomic<int> VoiceParameters::* target;
+};
+
+//==============================================================================
+// Configures `slider` and `label` from `spec`, wires the callback, and seeds
+// the atomic. `label` is the caption above the knob (section 3's "16 label"
+// strip) - the value readout below it is the slider's own text box, not a
+// second Label.
+inline void attachKnob (juce::Slider& slider, juce::Label& label,
+                         const KnobSpec& spec, VoiceParameters& params)
+{
+    // Upper-cased for display only - spec.name itself stays normal case,
+    // since that's what the tables above read as and any future debug
+    // output would print.
+    label.setText (juce::String (spec.name).toUpperCase(), juce::dontSendNotification);
+    label.setJustificationType (juce::Justification::centred);
+    label.setFont (PanelLookAndFeel::captionFont());
+
+    slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+
+    // 16px value-readout strip (documents/ui-design.md section 3); 70px wide,
+    // matching the throwaway scaffolding's text box.
+    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+    slider.setRange (spec.min, spec.max);
+
+    if (spec.skewMidpoint > 0.0)
+        slider.setSkewFactorFromMidPoint (spec.skewMidpoint);
+
+    if (spec.suffix != nullptr && spec.suffix[0] != '\0')
+        slider.setTextValueSuffix (spec.suffix);
+
+    // Display only - the underlying value and drag precision are untouched.
+    // Without this the readout shows a raw double's default ~7 decimal
+    // places (e.g. "0.7000000"), which is noise nobody reads. Wide-range
+    // controls (Cutoff, Arp Tempo) read better as whole numbers; everything
+    // else gets 2 decimal places, which is as fine as any of these controls
+    // are actually tuned by ear.
+    slider.setNumDecimalPlacesToDisplay (spec.max - spec.min >= 50.0 ? 0 : 2);
+
+    // Every mouse-driven control must decline keyboard focus, or clicking it
+    // steals focus and silently stops the computer keyboard playing notes -
+    // nothing logged, no crash. Combo boxes are the one deliberate exception
+    // (attachChoice, below) since they genuinely need keys to operate.
+    // documents/ui-design.md section 6.1.
+    slider.setWantsKeyboardFocus (false);
+
+    slider.onValueChange = [&slider, &spec, &params]
+    {
+        const auto value = (float) slider.getValue();
+        (params.*(spec.target)).store (spec.storeAsLog2 ? std::log2 (value) : value,
+                                        std::memory_order_relaxed);
+    };
+
+    slider.setValue (spec.def, juce::dontSendNotification);
+
+    // Seed: the widget and the atomic cannot disagree at startup.
+    slider.onValueChange();
+}
+
+// Configures `comboBox` and `label` from `spec`, wires onChange, and seeds
+// the atomic.
+inline void attachChoice (juce::ComboBox& comboBox, juce::Label& label,
+                           const ChoiceSpec& spec, VoiceParameters& params)
+{
+    // Upper-cased for display only - see attachKnob's identical comment.
+    label.setText (juce::String (spec.name).toUpperCase(), juce::dontSendNotification);
+    label.setJustificationType (juce::Justification::centred);
+    label.setFont (PanelLookAndFeel::captionFont());
+
+    // juce::ComboBox item IDs are 1-based - 0 means "no selection" - so
+    // store id = choice index + 1, and subtract 1 back off when reading
+    // getSelectedId(). Same convention as the throwaway scaffolding.
+    for (int i = 0; i < spec.numChoices; ++i)
+        comboBox.addItem (spec.choices[i], i + 1);
+
+    // Deliberately NOT setWantsKeyboardFocus(false) - the one exception to
+    // the focus-trap rule above, since a combo box needs keys to operate.
+
+    comboBox.onChange = [&comboBox, &spec, &params]
+    {
+        const auto index = comboBox.getSelectedId() - 1;
+        (params.*(spec.target)).store (index, std::memory_order_relaxed);
+    };
+
+    comboBox.setSelectedId (spec.defaultIndex + 1, juce::dontSendNotification);
+
+    // Seed, matching attachKnob's pattern.
+    comboBox.onChange();
+}
+
+// Configures `toggle` from `spec`, wires onClick, and seeds the atomic. No
+// caption Label parameter, unlike the two above: a ToggleButton draws its
+// own text (PanelLookAndFeel::drawToggleButton), so `spec.name` becomes the
+// button's own text rather than a sibling Label.
+inline void attachToggle (juce::ToggleButton& toggle, const ToggleSpec& spec, VoiceParameters& params)
+{
+    toggle.setButtonText (spec.name);
+    toggle.setWantsKeyboardFocus (false);
+
+    toggle.onClick = [&toggle, &spec, &params]
+    {
+        (params.*(spec.target)).store (toggle.getToggleState() ? 1 : 0, std::memory_order_relaxed);
+    };
+
+    toggle.setToggleState (spec.defaultValue != 0, juce::dontSendNotification);
+
+    // Seed, matching the other two attach helpers.
+    toggle.onClick();
+}
+
+//==============================================================================
+// A button that reports press AND release, not just "clicked".
+//
+// juce::Button::onStateChange would be the shorter route, but its exact
+// firing behaviour isn't something to assume without reading JUCE sources -
+// overriding mouseDown/mouseUp is unambiguous, since Component's
+// mouse-capture behaviour (mouseUp still reaches the component that started
+// the drag, even outside its bounds) is foundational and certain.
+//
+// Moved here unchanged from MainComponent.h - introduced for item 3's Gate
+// button, then reused by the on-screen keyboard, which is why it was worth
+// generalising rather than leaving Gate-specific. It has no reason to stay
+// private to MainComponent.
+//
+// NOT final - SynthPanel's PianoKey extends it for the press/release
+// semantics only, fully overriding paint() with its own piano-key drawing.
+struct MomentaryButton : public juce::TextButton
+{
+    std::function<void (bool)> onPressedChanged;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        juce::TextButton::mouseDown (e);
+        if (onPressedChanged != nullptr)
+            onPressedChanged (true);
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        juce::TextButton::mouseUp (e);
+        if (onPressedChanged != nullptr)
+            onPressedChanged (false);
+    }
+};

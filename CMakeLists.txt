@@ -27,6 +27,17 @@ juce_add_gui_app(Avijiator
     NEEDS_WEB_BROWSER FALSE
     NEEDS_CURL FALSE)
 
+# IBM Plex Sans, compiled in as binary data rather than relying on the
+# typeface being installed on whatever machine runs the .exe — matches the
+# static-runtime, single-exe, no-redistributable approach the rest of the
+# build already uses. Two weights only: Regular (body/labels) and SemiBold
+# (the header mark, matching documents/ui-mockup's font-weight:600) — no
+# need for the family's other weights this UI doesn't use.
+juce_add_binary_data(AvijiatorFonts
+    SOURCES
+        Source/UI/Fonts/IBMPlexSans-Regular.ttf
+        Source/UI/Fonts/IBMPlexSans-SemiBold.ttf)
+
 target_sources(Avijiator
     PRIVATE
         Source/Main.cpp
@@ -39,7 +50,10 @@ target_sources(Avijiator
         Source/DSP/Vcf.cpp
         Source/DSP/Adsr.cpp
         Source/DSP/Lfo.cpp
-        Source/DSP/NoteStack.cpp)
+        Source/DSP/NoteStack.cpp
+        Source/UI/PanelLookAndFeel.cpp
+        Source/UI/PanelSection.cpp
+        Source/UI/SynthPanel.cpp)
 
 # Quoted includes already resolve relative to the including file, so this is
 # convenience, not a requirement. Keep writing includes in relative form
@@ -75,6 +89,7 @@ target_compile_definitions(Avijiator
 # events, graphics, ...) are pulled in transitively.
 target_link_libraries(Avijiator
     PRIVATE
+        AvijiatorFonts
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats

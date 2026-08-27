@@ -20,6 +20,11 @@ void QwertyNoteInput::emit (NoteEvent::Type type, std::uint8_t noteNumber, float
         onNoteEvent ({ type, noteNumber, pitchLog2HzForMidiNote (noteNumber), velocity });
 }
 
+void QwertyNoteInput::adjustOctaveShift (int delta) noexcept
+{
+    octaveShift = juce::jlimit (minOctaveShift, maxOctaveShift, octaveShift + delta);
+}
+
 void QwertyNoteInput::pollKeyStates()
 {
     // Octave shift first, on the RISING edge only - it's an action, not a
@@ -32,10 +37,10 @@ void QwertyNoteInput::pollKeyStates()
     const auto octaveUpNow = juce::KeyPress::isKeyCurrentlyDown (octaveUpKeyCode);
 
     if (octaveDownNow && ! octaveDownWasHeld)
-        octaveShift = juce::jmax (minOctaveShift, octaveShift - 1);
+        adjustOctaveShift (-1);
 
     if (octaveUpNow && ! octaveUpWasHeld)
-        octaveShift = juce::jmin (maxOctaveShift, octaveShift + 1);
+        adjustOctaveShift (1);
 
     octaveDownWasHeld = octaveDownNow;
     octaveUpWasHeld = octaveUpNow;

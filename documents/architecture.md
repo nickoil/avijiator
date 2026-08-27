@@ -145,6 +145,36 @@ step sequencer below inherits.
   the envelope
 - Same clock/trigger plumbing as the arp underneath
 
+### Tempo sync (planned, not built)
+
+An internal **master tempo** that the LFO rate and arp tempo — and, once
+built, the step sequencer — can each optionally lock to, with its own
+division/ratio so the rate scales proportionally to the master rather than
+every consumer being forced to the same number. Nothing like this exists
+today: each tempo-driven consumer (currently only the arpeggiator) owns an
+independent `StepClock` and reads its own raw BPM atomic; there's no shared
+clock.
+
+**Not host sync.** [future-work.md](future-work.md)'s VST3-conversion item is
+about syncing to an *external* DAW clock, which CLAUDE.md rules out ("No
+host sync... internal tempo only"). A master tempo that only this app's own
+parameters lock to doesn't touch that constraint — internal stays internal.
+
+`StepClock`'s own doc comment already anticipates a second internal consumer
+once the step sequencer (item 7) exists ("the arpeggiator owns one, and item
+7's step sequencer will own another... this class is the piece those two
+SHARE") — that's the natural point a real shared master clock gets factored
+out, rather than before there are two real users. The LFO side is smaller:
+`Lfo::setRate` takes a raw Hz value today with no division/BPM concept, so
+syncing it needs a new Hz-from-BPM-and-division conversion, the same shape
+as `StepClock`'s own `beatsPerStepForDivision` table.
+
+Whether **glide time** locks to tempo too is explicitly undecided — it's a
+one-shot transition (seconds to glide one octave), not a periodic rate like
+the other three, and "glide takes one beat" is a different feature from
+"glide's seconds value scales with tempo." See TODO.md's parking-lot entry
+for this and the other open questions.
+
 ## UI
 
 - Panel-style layout echoing the SH-101 (knobs for cutoff, resonance, envelope
@@ -152,6 +182,40 @@ step sequencer below inherits.
 - Step grid for sequencer mode (tap to toggle step, secondary gesture for
   accent/slide — no right-click on touch, use long-press or a mode toggle)
 - Touch-first design (not a shrunk desktop UI) since Android is the primary target
+
+### Item 6 — instrument panel (built)
+
+Full design record and build order: [ui-design.md](ui-design.md). Decisions
+settled there, recorded here so a later session doesn't reopen them:
+
+- **Mockup first, in a Claude Design canvas**, then every `Slider`/
+  `LookAndFeel` hand-written in JUCE against it — no code transfer, visual
+  reference only
+- **Clean modern flat** styling (dark, not skeuomorphic hardware grey) — less
+  drawing code, reads better small; `architecture.md`'s "familiar layout" is
+  about arrangement, not a fake aluminium texture
+- **Fixed design canvas (1280x660) + a global `AffineTransform` scale**, one
+  layout authored once and scaled to fit the real window — the transform
+  lives on the child panel (`SynthPanel`), not on `MainComponent` itself, so
+  JUCE's hit-testing still routes mouse coordinates correctly
+- **Knob diameter (76px) is derived from the Android touch target**, not
+  chosen by eye: scaling the 1280x660 canvas to a Pixel 8 landscape screen
+  (2400x1080 physical, ~2.625 density) puts a 76px knob at ~47.4dp — just
+  over the ~48dp minimum comfortable touch target. This is why the knobs look
+  oversized on a desktop monitor; that's deliberate, confirmed by a phone-
+  landscape mockup artboard, and the number Stage B's touch pass inherits
+- Arp performance params (pattern, division, tempo, gate, hold) **stay in
+  `VoiceParameters`** rather than splitting into a separate struct — the
+  split would buy purity and cost a second spec table for no user-visible
+  gain
+- The step sequencer's panel region (item 7) is **reserved and empty**, not
+  built — costs nothing now, avoids a layout redesign later
+
+**Not yet confirmed** — needs a human at the screen, not arithmetic: whether
+the panel *looks* right, whether the grouping is the one that makes sense to
+play from, and whether 76px knobs are actually big enough to hit on a phone
+(the 48dp figure above is a derivation, not a touch test — real answer comes
+at Stage B item 9).
 
 ## Live performance rig
 
