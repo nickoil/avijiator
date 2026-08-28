@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <cmath>
 #include <functional>
 
@@ -172,6 +174,48 @@ inline void attachToggle (juce::ToggleButton& toggle, const ToggleSpec& spec, Vo
 
     // Seed, matching the other two attach helpers.
     toggle.onClick();
+}
+
+//==============================================================================
+/*
+    Item 7 build step 6: the "index-based attach-helper" documents/
+    step-sequencer-design.md section 4 calls for, alongside attachKnob/
+    attachChoice/attachToggle above. Not an attach helper in the same sense
+    as those three, though - StepCell (SynthPanel.h) is a hand-painted
+    juce::Component with several gestures multiplexed onto one mouse
+    listener, not a single Slider/ComboBox/ToggleButton with one onChange
+    callback, so there is no widget for a spec+attach pair to configure.
+    These four just do the read/write side these gestures need: a
+    member-pointer-to-ARRAY plus a step index, rather than attachKnob's
+    member-pointer-to-scalar.
+*/
+template <typename T>
+inline T loadStepValue (std::array<std::atomic<T>, seqMaxSteps> VoiceParameters::* target,
+                         int index, const VoiceParameters& params) noexcept
+{
+    return (params.*target)[(size_t) index].load (std::memory_order_relaxed);
+}
+
+template <typename T>
+inline void storeStepValue (std::array<std::atomic<T>, seqMaxSteps> VoiceParameters::* target,
+                             int index, T value, VoiceParameters& params) noexcept
+{
+    (params.*target)[(size_t) index].store (value, std::memory_order_relaxed);
+}
+
+// The array equivalent of ToggleSpec/attachToggle's 0/1 storage convention -
+// stepGateOn/stepAccent/stepSlide are all std::atomic<int> arrays storing
+// 0 or 1, same as every other boolean flag in VoiceParameters.
+inline bool loadStepFlag (std::array<std::atomic<int>, seqMaxSteps> VoiceParameters::* target,
+                           int index, const VoiceParameters& params) noexcept
+{
+    return loadStepValue (target, index, params) != 0;
+}
+
+inline void toggleStepFlag (std::array<std::atomic<int>, seqMaxSteps> VoiceParameters::* target,
+                             int index, VoiceParameters& params) noexcept
+{
+    storeStepValue (target, index, loadStepFlag (target, index, params) ? 0 : 1, params);
 }
 
 //==============================================================================

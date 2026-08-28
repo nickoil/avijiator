@@ -19,6 +19,10 @@ namespace
                    "the pattern combo box and ArpPattern must stay in step");
 
     // Order and text follow StepDivision exactly - longest step first.
+    // Reused for BOTH the arp's Division combo and, item 7 build step 6, the
+    // sequencer's - StepDivision is one shared enum, and ChoiceSpec's
+    // `choices` is just a pointer, so the same table can back two different
+    // ChoiceSpecs with two different targets.
     const char* const arpDivisionChoices[] = { "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
 
     static_assert ((int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])) == numStepDivisions,
@@ -52,6 +56,41 @@ namespace
         juce::GlyphArrangement glyphs;
         glyphs.addLineOfText (font, text, 0.0f, 0.0f);
         return glyphs.getBoundingBox (0, text.length(), true).getWidth();
+    }
+
+    //==========================================================================
+    // Item 7 build step 6: StepCell's pitch-lane readout and drag math both
+    // need the inverse of NoteEvent.h's pitchLog2HzForMidiNote - that
+    // function only goes note-number -> pitch, never back.
+    int midiNoteForPitchLog2Hz (float pitchLog2Hz) noexcept
+    {
+        // Same anchor as pitchLog2HzForMidiNote: log2(440) = 8.78136,
+        // MIDI 69 = A4 by definition.
+        return (int) std::lround ((double) (pitchLog2Hz - 8.78136f) * 12.0) + 69;
+    }
+
+    // "C3" for MIDI 48, matching SynthPanel::keyboardBaseNoteNumber's own
+    // octave anchor exactly (setOctaveShift uses the identical convention) -
+    // duplicated as a literal rather than reaching into that private
+    // constant, same trade-off OctaveControl's shortcut labels already make
+    // against QwertyNoteInput's key codes (see that struct's comment).
+    juce::String noteNameForMidiNote (int midiNoteNumber) noexcept
+    {
+        static const char* const names[12] =
+        {
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+        };
+
+        constexpr int midiNoteForC3 = 48;
+        const auto semitoneFromC3 = midiNoteNumber - midiNoteForC3;
+
+        // Floor division, not truncation - a negative semitoneFromC3 (any
+        // note below C3) must still land in the right octave rather than
+        // rounding toward zero.
+        const auto octave = 3 + (int) std::floor ((float) semitoneFromC3 / 12.0f);
+        const auto nameIndex = ((semitoneFromC3 % 12) + 12) % 12;
+
+        return juce::String (names[nameIndex]) + juce::String (octave);
     }
 }
 
@@ -187,6 +226,34 @@ const KnobSpec SynthPanel::outputKnobSpecs[numOutputKnobs] =
     { "Level", 0.0, 1.0, 0.25, false, 0.0, "", &VoiceParameters::outputLevel },
 };
 
+// Item 7 build step 6. Tempo/Gate ranges mirror the arp's own knobs exactly
+// (arpKnobSpecs above) - same StepClock-backed clamps, same reasoning: a
+// knob must never be able to ask for something the clock or the sequencer's
+// own gate-fraction clamp will silently refuse.
+const KnobSpec SynthPanel::seqKnobSpecs[numSeqKnobs] =
+{
+    { "Tempo", 20.0, 300.0, 120.0, false, 0.0, " BPM", &VoiceParameters::seqTempoBpm  },
+    { "Gate",  0.05,  0.95,  0.50, false, 0.0, "",     &VoiceParameters::seqGateLength },
+};
+
+const ChoiceSpec SynthPanel::seqChoiceSpecs[numSeqChoices] =
+{
+    {
+        "Division",
+        arpDivisionChoices,
+        (int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])),
+        (int) StepDivision::Sixteenth,
+        &VoiceParameters::seqDivision
+    },
+};
+
+// Off on first load, same reasoning as arpToggleSpecs' "On" entry - the
+// instrument must not start sequencing notes nobody programmed.
+const ToggleSpec SynthPanel::seqToggleSpecs[numSeqToggles] =
+{
+    { "On", 0, &VoiceParameters::seqEnabled },
+};
+
 //==============================================================================
 // One octave, C3 to C4 inclusive - the closing C makes it read as a keyboard
 // rather than stopping awkwardly on B. `letter` matches QwertyNoteInput.cpp's
@@ -202,17 +269,211 @@ const SynthPanel::KeyboardKeySpec SynthPanel::keyboardKeySpecs[numKeyboardKeys] 
 };
 
 //==============================================================================
-void SynthPanel::SeqReservedStrip::paint (juce::Graphics& g)
+void SynthPanel::StepCell::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+
+    const auto gateOn = loadStepFlag (&VoiceParameters::stepGateOn, index, *parameters);
+    const auto accent = loadStepFlag (&VoiceParameters::stepAccent, index, *parameters);
+    const auto slide  = loadStepFlag (&VoiceParameters::stepSlide,  index, *parameters);
+
+    // Beat grouping - alternating shading per 4-step group, the same visual
+    // convention a hardware step sequencer's grid uses so a 16-cell row
+    // reads at a glance rather than needing to be counted.
+    const auto groupIsAlt = (index / 4) % 2 == 1;
+    auto background = groupIsAlt ? PanelLookAndFeel::sectionFill.brighter (0.04f)
+                                  : PanelLookAndFeel::sectionFill;
+
+    if (gateOn)
+        background = accent ? PanelLookAndFeel::accent : PanelLookAndFeel::accent.withAlpha (0.55f);
+
+    g.setColour (background);
+    g.fillRoundedRectangle (bounds, 3.0f);
+
+    g.setColour (isCurrentlyPlaying ? PanelLookAndFeel::accentAlt : PanelLookAndFeel::outline);
+    g.drawRoundedRectangle (bounds, 3.0f, isCurrentlyPlaying ? 2.0f : 1.0f);
+
+    // The currently selected lane's value, overlaid on top of the gate/
+    // accent state above rather than replacing it - see the class comment
+    // for why pitch reads as text but cutoff/resonance read as a fill bar.
+    const auto lane = selectedLane != nullptr ? *selectedLane : 0;
+
+    if (lane == 0)
+    {
+        const auto pitchLog2Hz = loadStepValue (&VoiceParameters::stepPitchLog2Hz, index, *parameters);
+
+        g.setColour (gateOn ? PanelLookAndFeel::text : PanelLookAndFeel::textDim);
+        g.setFont (juce::Font (juce::FontOptions (11.0f).withTypeface (PanelLookAndFeel::regularTypeface())));
+        g.drawText (noteNameForMidiNote (midiNoteForPitchLog2Hz (pitchLog2Hz)),
+                    bounds.toNearestInt(), juce::Justification::centred);
+    }
+    else
+    {
+        const auto value = loadStepValue (lane == 1 ? &VoiceParameters::stepCutoffNorm
+                                                      : &VoiceParameters::stepResonanceNorm,
+                                            index, *parameters);
+
+        auto barBounds = bounds.reduced (bounds.getWidth() * 0.3f, 0.0f)
+                                .withTrimmedTop (bounds.getHeight() * (1.0f - juce::jlimit (0.0f, 1.0f, value)));
+        g.setColour (PanelLookAndFeel::accentAlt.withAlpha (0.85f));
+        g.fillRect (barBounds);
+    }
+
+    // Slide - a small triangle pointing at the next cell, drawn last so it
+    // sits on top of everything else.
+    if (slide)
+    {
+        g.setColour (PanelLookAndFeel::text);
+        const auto right = bounds.getRight();
+        const auto midY = bounds.getCentreY();
+        juce::Path arrow;
+        arrow.addTriangle (right - 8.0f, midY - 4.0f, right - 8.0f, midY + 4.0f, right - 2.0f, midY);
+        g.fillPath (arrow);
+    }
+}
+
+void SynthPanel::StepCell::mouseDown (const juce::MouseEvent& e)
+{
+    isDraggedFar = false;
+    pendingRightClick = e.mods.isRightButtonDown();
+    pendingShiftClick = e.mods.isShiftDown();
+    dragStartY = e.getPosition().y;
+
+    const auto lane = selectedLane != nullptr ? *selectedLane : 0;
+    dragStartValue = lane == 0 ? loadStepValue (&VoiceParameters::stepPitchLog2Hz, index, *parameters)
+                    : lane == 1 ? loadStepValue (&VoiceParameters::stepCutoffNorm, index, *parameters)
+                                : loadStepValue (&VoiceParameters::stepResonanceNorm, index, *parameters);
+}
+
+void SynthPanel::StepCell::mouseDrag (const juce::MouseEvent& e)
+{
+    if ((float) e.getDistanceFromDragStart() < dragThreshold)
+        return;
+
+    isDraggedFar = true;
+
+    const auto lane = selectedLane != nullptr ? *selectedLane : 0;
+
+    // UP is positive - JUCE's Y grows downward, so a smaller current Y than
+    // the drag's start means the mouse moved up, which is "increase" for
+    // both a pitch (higher note) and a lane value (more cutoff/resonance).
+    const auto deltaY = (float) (dragStartY - e.getPosition().y);
+
+    if (lane == 0)
+    {
+        constexpr float pixelsPerSemitone = 8.0f;
+        const auto semitoneDelta = (int) std::round (deltaY / pixelsPerSemitone);
+        const auto startMidiNote = midiNoteForPitchLog2Hz (dragStartValue);
+        storeStepValue (&VoiceParameters::stepPitchLog2Hz, index,
+                         pitchLog2HzForMidiNote (startMidiNote + semitoneDelta), *parameters);
+    }
+    else
+    {
+        const auto range = (float) juce::jmax (1, getHeight());
+        const auto newValue = juce::jlimit (0.0f, 1.0f, dragStartValue + deltaY / range);
+        storeStepValue (lane == 1 ? &VoiceParameters::stepCutoffNorm : &VoiceParameters::stepResonanceNorm,
+                         index, newValue, *parameters);
+    }
+
+    repaint();
+}
+
+void SynthPanel::StepCell::mouseUp (const juce::MouseEvent&)
+{
+    // A real drag already applied its change live in mouseDrag above - a
+    // click gesture (gate/accent/slide) only fires when the gesture turned
+    // out NOT to be a drag, so the two never both fire for the same press.
+    if (isDraggedFar)
+        return;
+
+    if (pendingRightClick)
+        toggleStepFlag (&VoiceParameters::stepAccent, index, *parameters);
+    else if (pendingShiftClick)
+        toggleStepFlag (&VoiceParameters::stepSlide, index, *parameters);
+    else
+        toggleStepFlag (&VoiceParameters::stepGateOn, index, *parameters);
+
+    repaint();
+}
+
+//==============================================================================
+SynthPanel::StepGrid::StepGrid()
+{
+    for (auto& cell : cells)
+        addAndMakeVisible (cell);
+}
+
+SynthPanel::StepGrid::~StepGrid()
+{
+    stopTimer();
+}
+
+void SynthPanel::StepGrid::configure (VoiceParameters& parametersToControl) noexcept
+{
+    parameters = &parametersToControl;
+
+    for (int i = 0; i < seqMaxSteps; ++i)
+    {
+        auto& cell = cells[(size_t) i];
+        cell.parameters = parameters;
+        cell.index = i;
+        cell.selectedLane = &selectedLane;
+    }
+
+    // Comfortably above a 16th note at any playable tempo - see the
+    // constant's own comment in the header for why this polls rather than
+    // each cell reading currentStepForUi directly in its own paint().
+    startTimerHz (highlightHz);
+}
+
+void SynthPanel::StepGrid::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-    g.setColour (PanelLookAndFeel::sectionFill.withAlpha (0.5f));
+    g.setColour (PanelLookAndFeel::sectionFill);
     g.fillRoundedRectangle (bounds, 6.0f);
     g.setColour (PanelLookAndFeel::outline);
     g.drawRoundedRectangle (bounds, 6.0f, 1.0f);
+}
 
-    g.setColour (PanelLookAndFeel::textDim);
-    g.setFont (juce::Font (juce::FontOptions (14.0f).withTypeface (PanelLookAndFeel::regularTypeface())));
-    g.drawText ("SEQ - reserved for item 7", getLocalBounds(), juce::Justification::centred);
+void SynthPanel::StepGrid::resized()
+{
+    constexpr int edgePadding = 6;
+    auto bounds = getLocalBounds().reduced (edgePadding);
+    const auto cellWidth = bounds.getWidth() / seqMaxSteps;
+
+    for (int i = 0; i < seqMaxSteps; ++i)
+    {
+        // The last cell absorbs any leftover pixels from the integer
+        // division above, same reasoning as every other fixed-width layout
+        // in this file that doesn't divide evenly.
+        const auto width = (i == seqMaxSteps - 1) ? bounds.getWidth() - cellWidth * (seqMaxSteps - 1)
+                                                    : cellWidth;
+        cells[(size_t) i].setBounds (bounds.getX() + cellWidth * i, bounds.getY(), width, bounds.getHeight());
+    }
+}
+
+void SynthPanel::StepGrid::timerCallback()
+{
+    if (parameters == nullptr)
+        return;
+
+    const auto currentStep = parameters->currentStepForUi.load (std::memory_order_relaxed);
+    if (currentStep == lastHighlightedStep)
+        return;
+
+    if (lastHighlightedStep >= 0 && lastHighlightedStep < seqMaxSteps)
+    {
+        cells[(size_t) lastHighlightedStep].isCurrentlyPlaying = false;
+        cells[(size_t) lastHighlightedStep].repaint();
+    }
+
+    if (currentStep >= 0 && currentStep < seqMaxSteps)
+    {
+        cells[(size_t) currentStep].isCurrentlyPlaying = true;
+        cells[(size_t) currentStep].repaint();
+    }
+
+    lastHighlightedStep = currentStep;
 }
 
 //==============================================================================
@@ -479,11 +740,61 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
 
     wireKnobs (outputKnobs, outputKnobSpecs, numOutputKnobs, outputSection);
 
+    // Item 7 build step 6. Cell order: On, Division, Pattern Length, Tempo,
+    // Gate, Lane - see the member comment in SynthPanel.h. On is added
+    // FIRST, same "toggle cell goes first" precedent as ARP's above.
+    attachToggle (seqOnToggle, seqToggleSpecs[0], params);
+    seqControlSection.addCell (seqOnCaption, seqOnToggle);
+
+    wireChoices (seqChoices, seqChoiceSpecs, numSeqChoices, seqControlSection);
+
+    // Pattern Length: NOT attachChoice - see numSeqChoices' own comment in
+    // the header on why a plain 1..16 count can't share attachChoice's
+    // index-is-the-value contract the way every enum-backed ChoiceSpec does.
+    // Item IDs are set to the length itself (1..16), so getSelectedId() can
+    // be stored straight into the atomic with no off-by-one translation.
+    seqPatternLengthLabel.setText ("PATTERN LENGTH", juce::dontSendNotification);
+    seqPatternLengthLabel.setJustificationType (juce::Justification::centred);
+    seqPatternLengthLabel.setFont (PanelLookAndFeel::captionFont());
+
+    for (int length = 1; length <= seqMaxSteps; ++length)
+        seqPatternLengthCombo.addItem (juce::String (length), length);
+
+    seqPatternLengthCombo.onChange = [this]
+    {
+        params.seqPatternLength.store (seqPatternLengthCombo.getSelectedId(), std::memory_order_relaxed);
+    };
+    seqPatternLengthCombo.setSelectedId (seqMaxSteps, juce::dontSendNotification); // matches the atomic's own default
+    seqPatternLengthCombo.onChange(); // seed, matching every attach helper's own seed call
+    seqControlSection.addCell (seqPatternLengthLabel, seqPatternLengthCombo, false);
+
+    wireKnobs (seqKnobs, seqKnobSpecs, numSeqKnobs, seqControlSection);
+
+    // Lane select has no VoiceParameters target - see StepGrid::selectedLane's
+    // own comment in the header - so it is wired directly rather than
+    // through attachChoice, which requires one.
+    seqLaneLabel.setText ("LANE", juce::dontSendNotification);
+    seqLaneLabel.setJustificationType (juce::Justification::centred);
+    seqLaneLabel.setFont (PanelLookAndFeel::captionFont());
+
+    seqLaneCombo.addItem ("Pitch", 1);
+    seqLaneCombo.addItem ("Cutoff", 2);
+    seqLaneCombo.addItem ("Resonance", 3);
+    seqLaneCombo.onChange = [this]
+    {
+        stepGrid.selectedLane = seqLaneCombo.getSelectedId() - 1;
+        stepGrid.repaint();
+    };
+    seqLaneCombo.setSelectedId (1, juce::dontSendNotification);
+    seqLaneCombo.onChange(); // seed, matching every attach helper's own seed call
+    seqControlSection.addCell (seqLaneLabel, seqLaneCombo, false);
+
     for (auto* section : { &vcoSection, &vcfSection, &envSection, &lfoSection,
-                            &keyboardSection, &arpSection, &outputSection })
+                            &keyboardSection, &arpSection, &outputSection, &seqControlSection })
         addAndMakeVisible (*section);
 
-    addAndMakeVisible (seqStrip);
+    stepGrid.configure (params);
+    addAndMakeVisible (stepGrid);
 
     //==========================================================================
     // On-screen piano keyboard - see PianoKey/PianoKeyboard in the header for
@@ -584,7 +895,11 @@ void SynthPanel::resized()
     constexpr int headerHeight = 36;
     constexpr int audioSettingsWidth = 130;
     constexpr int audioSettingsHeight = 28;
-    constexpr int seqStripHeight = 90;
+    // Item 7 build step 6: the pattern grid's own row height, chosen (not
+    // derived from PanelSection's cell geometry - StepGrid has no caption
+    // strip) to give a vertical-drag gesture a comfortable range, roughly
+    // matching a knob cell's own control-row height.
+    constexpr int stepGridHeight = 130;
     constexpr int keyboardRowHeight = 84 + PianoKeyboard::letterGap + PianoKeyboard::letterRowHeight;
 
     auto area = juce::Rectangle<int> (0, 0, designWidth, designHeight);
@@ -665,7 +980,19 @@ void SynthPanel::resized()
     }
     area.removeFromTop (gap);
 
-    seqStrip.setBounds (area.removeFromTop (seqStripHeight));
+    // Item 7 build step 6, replacing the old reserved strip. SEQUENCER's
+    // control cluster is left-aligned at its own natural width (like every
+    // other section) rather than stretched to fill the row - not every row
+    // needs to hit the 1240px budget exactly, only rows A/B did (section 3).
+    {
+        auto row = area.removeFromTop (PanelSection::heightForCells());
+        // +2 = the hand-wired Pattern Length and Lane cells - neither is a
+        // ChoiceSpec, see numSeqChoices' own comment in SynthPanel.h.
+        place (row, seqControlSection, numSeqToggles + numSeqChoices + numSeqKnobs + 2);
+    }
+    area.removeFromTop (gap);
+
+    stepGrid.setBounds (area.removeFromTop (stepGridHeight));
     area.removeFromTop (gap);
 
     // PianoKeyboard lays out its own keys and letter row internally - see

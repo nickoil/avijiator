@@ -287,6 +287,17 @@ struct VoiceParameters
     // arpGateLength.
     std::atomic<float> seqGateLength { 0.5f };
 
+    // AUDIO -> UI, item 7 build step 6 - the one atomic in this whole struct
+    // that flows the OPPOSITE direction from every other member here.
+    // Written by StepSequencer::process (audio thread) at every step
+    // boundary while the sequencer owns the voice; read by SynthPanel's
+    // StepGrid (a UI-thread Timer) to highlight the currently playing step
+    // (documents/step-sequencer-design.md section 9). -1 means "not
+    // currently playing" - StepSequencer::releaseVoice sets it back there on
+    // every hand-over away from the sequencer, so a stale highlight can
+    // never survive the voice changing owners.
+    std::atomic<int> currentStepForUi { -1 };
+
     static_assert (std::atomic<float>::is_always_lock_free,
                    "Parameter stores must not take a lock on the message thread "
                    "or block the audio thread reading them.");

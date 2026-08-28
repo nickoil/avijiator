@@ -293,7 +293,68 @@ Build/validate everything here before touching Android.
       `stepCutoffNorm`/`stepResonanceNorm`. **Not yet tuned by ear either**:
       `seqCutoffModRangeOctaves = 4.0f` is a placed-not-measured starting
       guess (CLAUDE.md's "what you cannot verify") — easy to retune once
-      step 6 gives it a knob to feel through. Build steps 6-8 not started.
+      step 6 gives it a knob to feel through.
+      **Step 6 (UI wiring) done:** replaces `SynthPanel::SeqReservedStrip`
+      with a real SEQUENCER control cluster (`PanelSection`, matching every
+      other section's style) plus a new hand-painted 16-cell pattern grid —
+      the pattern (pitch/gate/accent/slide/cutoff/resonance) is now editable
+      and playable from the UI, closing this build step's design-doc target.
+      **`designHeight` grew 660 → 840** (`Source/UI/SynthPanel.h`) — flagged,
+      not silent: this was pre-authorized by this document's section 9
+      ("expect a window resize... not a Polish-step afterthought"), but it
+      also pushes the panel's aspect ratio further from the Pixel's 2.22:1
+      landscape shape than section 3's own letterboxing discussion already
+      worried about, which bears on CLAUDE.md's open "real cost of the
+      Windows → Android port" question in degree, not in kind.
+      **New index-based attach helpers** (`Source/UI/ParameterControls.h`):
+      `loadStepValue`/`storeStepValue`/`loadStepFlag`/`toggleStepFlag`, the
+      per-step-array equivalent of `attachKnob`/`attachChoice`/`attachToggle`
+      — a member-pointer-to-array plus an index, since `StepCell` is a
+      hand-painted component multiplexing several gestures onto one mouse
+      listener rather than a single widget with one `onChange`.
+      **`StepCell`/`StepGrid`** (`Source/UI/SynthPanel.h/.cpp`), following
+      `PianoKey`'s hand-painted precedent. Gestures (this build step's own
+      choice — section 9 left the exact gesture open, "informed by how it
+      actually feels to use"; easy to revise): plain click toggles Gate,
+      right-click toggles Accent, shift+click toggles Slide — all three
+      lane-independent — and a vertical drag adjusts whichever lane is
+      currently selected (quantised semitones for Pitch, a proportional
+      0..1 change for Cutoff/Resonance), with a fill-bar overlay for the
+      continuous lanes and a note-name readout for Pitch. Beat-grouped
+      shading (alternating every 4 steps) and a live playhead outline
+      (`PanelLookAndFeel::accentAlt`) round it out. **New audio→UI channel**:
+      `VoiceParameters::currentStepForUi` — the one atomic in that struct
+      written by the audio thread (`StepSequencer::process`, cleared by
+      `releaseVoice`) and read by the UI thread (`StepGrid`'s 30Hz `Timer`),
+      the reverse direction of every other field there.
+      **Pattern Length needed hand-wiring, not `ChoiceSpec`**: caught before
+      it shipped — `attachChoice`'s generic contract stores the selected
+      item's zero-based index verbatim, which is correct for every existing
+      combo box because its target is an enum whose value already IS that
+      index, but `seqPatternLength` is a plain 1..16 count, off by exactly
+      one from its choice index. Wired by hand instead, storing
+      `getSelectedId()` itself (item IDs set to 1..16 directly) — documented
+      in `SynthPanel.h` so the next array-backed count doesn't repeat it.
+      Division reuses the arp's own `StepDivision` table safely, since that
+      one genuinely is an enum. The Lane selector (Pitch/Cutoff/Resonance)
+      is UI-only, no `VoiceParameters` target at all, also hand-wired.
+      Builds clean (Debug + Release, zero warnings); `cdb.exe` shows no new
+      assertion. **Verified visually, not just built**: launched the real
+      exe and screenshotted it twice from a script-driven, zero-interaction
+      cold start — correct layout (nothing clipped or overlapping down to
+      the piano row) and correct defaults for every new control (On off,
+      Division 1/16, Pattern Length 16, Tempo 120, Gate 0.50, Lane Pitch,
+      all 16 cells empty). **NOT verified**: the actual mouse gestures
+      (click/drag/right-click/shift-click) — synthetic input in this
+      environment proved unreliable (a multi-monitor DPI/coordinate mismatch
+      between window capture and injected clicks meant one synthetic click
+      landed on an unrelated window on the user's desktop, a harmless
+      cursor-placement click but a real miss) and was abandoned rather than
+      risking further interference with the user's other windows. **The
+      user needs to click around by hand** before trusting the gesture set
+      described above; a wrong or unresponsive gesture would currently fail
+      silently, the same class of gap CLAUDE.md's "what you cannot verify"
+      exists for. Build steps 7-8 not started.
       **Future consideration, not yet scoped into this item**: *generalised*
       per-step parameter automation ("p-locks") for arbitrary parameters
       beyond pitch/gate/accent/slide/cutoff/resonance — full design in

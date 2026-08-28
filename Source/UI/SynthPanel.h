@@ -30,9 +30,18 @@ class SynthPanel final : public juce::Component
 {
 public:
     // documents/ui-design.md section 3 - the one place item 6 makes a
-    // decision Stage B has to live with. Confirmed by step 1's canvas mockup.
+    // decision Stage B has to live with. Confirmed by step 1's canvas
+    // mockup. designHeight grew from 660 in item 7 build step 6, exactly the
+    // resize documents/step-sequencer-design.md section 9 flagged as
+    // expected rather than a Polish-step afterthought - the real
+    // SEQUENCER control cluster plus the 16-cell pattern grid replacing the
+    // old 90px reserved strip needed real room. Flagged, not silent: this
+    // moves the panel's aspect ratio further from the Pixel's 2.22:1
+    // landscape shape than ui-design.md section 3's own letterboxing
+    // discussion already worried about at 660 - the Android-port cost
+    // question CLAUDE.md leaves open is unaffected in kind, only in degree.
     static constexpr int designWidth = 1280;
-    static constexpr int designHeight = 660;
+    static constexpr int designHeight = 840;
 
     // pushNoteEventIn is router.pushUiEvent, handed in by MainComponent in
     // step 6 - see the class comment above.
@@ -97,11 +106,123 @@ private:
         }
     };
 
-    // The empty item-7 placeholder (documents/ui-design.md section 9) -
-    // dim outline and caption, nothing interactive, nothing p-lock-shaped.
-    struct SeqReservedStrip final : public juce::Component
+    //==========================================================================
+    // Item 7 build step 6: one step of the 16-step pattern grid, replacing
+    // the item-7 placeholder that used to live here (documents/ui-design.md
+    // section 9's dim "reserved" outline). Hand-painted, following PianoKey's
+    // precedent above, for the states no existing widget covers: gate/
+    // accent/slide as flat colour/marker states, plus a continuous-value
+    // overlay for whichever lane is currently selected for editing
+    // (documents/step-sequencer-design.md section 9's bar-height/
+    // fill-amount idea).
+    //
+    // GESTURES - this build step's own choice, since section 9 explicitly
+    // leaves the exact gesture open ("informed by how it actually feels to
+    // use", not a desk decision) - easy to revise if it reads wrong in play:
+    //   - plain click (no drag): toggle Gate On/Off.
+    //   - right-click: toggle Accent.
+    //   - shift+click: toggle Slide.
+    //   - vertical drag: adjust the CURRENTLY SELECTED lane's value for this
+    //     step - quantised semitones for Pitch, a proportional 0..1 change
+    //     for Cutoff/Resonance.
+    // The three click gestures are lane-INDEPENDENT - switching which lane
+    // is selected never changes what a plain click, right-click or
+    // shift-click does, only what a DRAG does and what the overlay shows.
+    //
+    // Not wired through attachKnob/attachChoice/attachToggle - those
+    // configure a single widget's own onChange callback, and this component
+    // multiplexes several gestures onto one mouse listener instead. Uses
+    // ParameterControls.h's loadStepValue/storeStepValue/loadStepFlag/
+    // toggleStepFlag for the read/write side.
+    struct StepCell final : public juce::Component
     {
+        // Set by StepGrid::configure() right after construction, mirroring
+        // PianoKeyboard's own "default-construct, then configure" precedent
+        // (std::array needs default-constructible elements). Non-owning:
+        // parameters and selectedLane both outlive every StepCell, since
+        // StepGrid owns the array holding this cell and is destroyed
+        // no earlier than the VoiceParameters/SynthPanel that own it.
+        VoiceParameters* parameters = nullptr;
+        int index = 0;
+        const int* selectedLane = nullptr; // 0 = Pitch, 1 = Cutoff, 2 = Resonance
+
+        // Set by StepGrid's Timer callback only - not this cell's own
+        // concern to compute, since "which step is playing" is a single
+        // grid-wide fact, not a per-cell one.
+        bool isCurrentlyPlaying = false;
+
         void paint (juce::Graphics&) override;
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+
+    private:
+        // A drag shorter than this is a click, not a gesture - checked in
+        // mouseUp via isDraggedFar rather than trusting JUCE's own
+        // mouseWasDraggedSinceMouseDown flag, since that flag apparently
+        // marks any nonzero movement as a drag, and a mouse click is never
+        // perfectly still for a whole pixel-level of travel in practice.
+        static constexpr float dragThreshold = 4.0f;
+
+        // Drag-start snapshot, so a drag computes its delta from where the
+        // gesture BEGAN rather than compounding per-callback rounding.
+        // Which of the three lanes dragStartValue was read from is whatever
+        // *selectedLane resolved to at mouseDown - if it changes mid-drag
+        // (the combo box cannot itself take focus away from an in-progress
+        // drag, but written down as a known limitation) the drag keeps
+        // acting on the lane it started with.
+        float dragStartValue = 0.0f;
+        int dragStartY = 0;
+        bool isDraggedFar = false;
+        bool pendingRightClick = false;
+        bool pendingShiftClick = false;
+    };
+
+    // 16 StepCells in a row, no per-cell caption - the lane-select and the
+    // currently-playing highlight are grid-wide concerns, not something a
+    // caption above each cell could show. Styled like PanelSection's own
+    // rounded-rect fill/outline for visual consistency, but not built on
+    // that class - StepCell has no separate caption strip, unlike every
+    // existing KnobCell/ChoiceCell, so PanelSection's two-row grid geometry
+    // does not fit it.
+    struct StepGrid final : public juce::Component,
+                             private juce::Timer
+    {
+        StepGrid();
+        ~StepGrid() override;
+
+        // Must be called once, before this component is shown - mirrors
+        // PianoKeyboard's key-configuring loop in SynthPanel's constructor,
+        // since std::array<StepCell, N> needs default-constructible
+        // elements and configuration happens after.
+        void configure (VoiceParameters& parametersToControl) noexcept;
+
+        void paint (juce::Graphics&) override;
+        void resized() override;
+
+        // 0 = Pitch, 1 = Cutoff, 2 = Resonance. UI-local state, not a
+        // VoiceParameters atomic - this selects which value a DRAG on any
+        // cell edits and which overlay is drawn, it is not itself a synth
+        // parameter. Shared with every StepCell via a pointer
+        // (StepCell::selectedLane) set in configure(), so changing it once
+        // here is visible to all 16 cells at once.
+        int selectedLane = 0;
+
+    private:
+        // Polls VoiceParameters::currentStepForUi (audio thread -> UI) and
+        // repaints only the two cells whose isCurrentlyPlaying flag actually
+        // changes - see that atomic's own comment in VoiceParameters.h for
+        // why this indirection exists at all rather than a direct read in
+        // each cell's paint().
+        void timerCallback() override;
+
+        static constexpr int highlightHz = 30; // comfortably above a 16th note at any playable tempo
+
+        std::array<StepCell, seqMaxSteps> cells;
+        VoiceParameters* parameters = nullptr;
+        int lastHighlightedStep = -1;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StepGrid)
     };
 
     //==========================================================================
@@ -112,6 +233,28 @@ private:
     static constexpr int numKeyboardKnobs = 1, numKeyboardChoices = 2;
     static constexpr int numArpKnobs = 2, numArpChoices = 2, numArpToggles = 2;
     static constexpr int numOutputKnobs = 1;
+
+    // Item 7 build step 6's own SEQUENCER control cluster - not part of
+    // documents/ui-design.md section 2's original table (that document is
+    // item 6's spec, frozen before item 7 existed), so deliberately NOT
+    // folded into the static_asserts below: those guard item 6's own
+    // historical counts, not a running total of every control ever added to
+    // the panel. On (toggle), Pattern Length and Lane are all special-cased
+    // in the .cpp rather than routed through ChoiceSpec/attachChoice,
+    // mirroring how the arp's On+Hold toggle stack and ENV's
+    // envRowWidthCompensation cell are already special-cased there:
+    //   - Lane has no VoiceParameters target at all (see
+    //     StepGrid::selectedLane's own comment).
+    //   - Pattern Length DOES have one (seqPatternLength), but
+    //     attachChoice's generic contract stores the selected item's
+    //     ZERO-BASED INDEX verbatim - correct for every other ChoiceSpec in
+    //     this file because their target is an enum whose underlying value
+    //     already IS that index, but seqPatternLength is a plain 1..16
+    //     COUNT, not an enum, so index and value are off by exactly one.
+    //     Wiring it by hand stores getSelectedId() itself instead.
+    static constexpr int numSeqKnobs = 2;    // Tempo, Gate
+    static constexpr int numSeqChoices = 1;  // Division only - see above
+    static constexpr int numSeqToggles = 1;  // On (Hold has no seq equivalent)
 
     // The load-bearing counts from section 2: "19 knobs, 6 combo boxes, 2
     // toggles = 27" must still hold after being spread across seven arrays
@@ -145,6 +288,10 @@ private:
     static const ChoiceSpec arpChoiceSpecs[numArpChoices];
     static const ToggleSpec arpToggleSpecs[numArpToggles];
     static const KnobSpec outputKnobSpecs[numOutputKnobs];
+
+    static const KnobSpec seqKnobSpecs[numSeqKnobs];
+    static const ChoiceSpec seqChoiceSpecs[numSeqChoices];
+    static const ToggleSpec seqToggleSpecs[numSeqToggles];
 
     //==========================================================================
     // On-screen keyboard (C3-C4), piano-styled per documents/ui-mockup's
@@ -277,7 +424,27 @@ private:
     PanelSection outputSection { "OUTPUT" };
     std::array<KnobCell, numOutputKnobs> outputKnobs;
 
-    SeqReservedStrip seqStrip;
+    // Item 7 build step 6, replacing the item-7 reserved placeholder that
+    // used to be here. Cell order is On, Division, Pattern Length, Tempo,
+    // Gate, Lane - matching documents/step-sequencer-design.md section 9's
+    // "On/Division/Tempo/Gate/PatternLength" list with Pattern Length moved
+    // next to Division (both structural/discrete) and Lane - this build
+    // step's own addition, the grid's edit-mode selector - appended last.
+    PanelSection seqControlSection { "SEQUENCER" };
+    juce::ToggleButton seqOnToggle;
+    juce::Label seqOnCaption; // blank - see arpToggleCaption's identical precedent above
+    std::array<ChoiceCell, numSeqChoices> seqChoices; // Division only
+    std::array<KnobCell, numSeqKnobs> seqKnobs;       // Tempo, Gate
+
+    // NOT ChoiceSpec/attachChoice cells - see numSeqChoices' own comment
+    // above for why each of these needs hand-wiring rather than the generic
+    // helper every other combo box in this file goes through.
+    juce::ComboBox seqPatternLengthCombo;
+    juce::Label seqPatternLengthLabel;
+    juce::ComboBox seqLaneCombo;
+    juce::Label seqLaneLabel;
+
+    StepGrid stepGrid;
 
     PianoKeyboard pianoKeyboard;
     OctaveControl octaveControl;

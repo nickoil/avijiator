@@ -73,7 +73,10 @@ public:
         3). Cutoff and resonance are read every step boundary, independent of
         gate state - a rest can still sweep the filter - and build step 5
         pushes both into SynthVoice::setStepFilterModulation right here,
-        rather than reading and discarding them.
+        rather than reading and discarding them. Build step 6 adds one more
+        write at the same point: VoiceParameters::currentStepForUi, the
+        pattern grid's playhead - the only field in this class that exists
+        for the UI thread rather than the DSP.
 
         Writes into output, does not add to it - same contract as
         SynthVoice::renderNextBlock and Arpeggiator::process.
@@ -103,7 +106,9 @@ public:
         been running silently for minutes. No latch/phrase state to clear
         here unlike the arp's own releaseVoice - the pattern itself lives in
         VoiceParameters, not in per-run walker state, so there is nothing
-        else to reset.
+        else to reset - except build step 6's currentStepForUi, which IS
+        reset here: the grid's playhead must not keep pointing at a step
+        that stopped playing the moment ownership moved elsewhere.
 
         Unlike NoteRouter, there is no matching retakeVoice: the sequencer's
         own clock parks on a boundary right here, so the very next process()

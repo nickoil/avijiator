@@ -86,6 +86,14 @@ void StepSequencer::process (SynthVoice& voice, float* output, int numSamples) n
         {
             const auto index = (size_t) patternIndexFor (clock.getStepIndex(), patternLength);
 
+            // Build step 6: the UI-facing playhead. Written every step
+            // boundary regardless of gate state, same reasoning as the
+            // filter lanes below - a rest is still a step the grid should
+            // visibly move through. Relaxed: SynthPanel's Timer only ever
+            // reads it for a highlight repaint, never anything
+            // audio-affecting.
+            parameters.currentStepForUi.store ((int) index, std::memory_order_relaxed);
+
             // Read every step boundary, independent of gate state - a rest
             // can still sweep the filter (documents/step-sequencer-design.md
             // section 3). Build step 5: now actually pushed into SynthVoice's
@@ -171,6 +179,13 @@ void StepSequencer::releaseVoice (SynthVoice& voice) noexcept
     }
 
     samplesUntilGateOff = 0;
+
+    // Build step 6: the UI playhead is only meaningful while THIS sequencer
+    // owns the voice - leaving it pointing at a stale index after a hand-over
+    // away would highlight a step that is not actually playing. Unconditional,
+    // not guarded like the note-off above: idempotently re-storing -1 is
+    // harmless even when it was already -1.
+    voice.getParameters().currentStepForUi.store (-1, std::memory_order_relaxed);
 
     // Park the clock on a boundary and abandon the current pass through the
     // pattern, so switching the sequencer back on starts the next phrase at
