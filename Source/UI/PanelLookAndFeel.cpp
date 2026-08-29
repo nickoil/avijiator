@@ -20,6 +20,10 @@ juce::Typeface::Ptr PanelLookAndFeel::regularTypeface()
 {
     static const juce::Typeface::Ptr typeface = juce::Typeface::createSystemTypefaceFor (
         BinaryData::IBMPlexSansRegular_ttf, (size_t) BinaryData::IBMPlexSansRegular_ttfSize);
+    // Was failing silently (see fontFor()'s comment) - turn a genuine
+    // BinaryData/resource mismatch into a loud, debugger-visible failure
+    // instead of a quiet fall-back to the system default font.
+    jassert (typeface != nullptr);
     return typeface;
 }
 
@@ -27,7 +31,26 @@ juce::Typeface::Ptr PanelLookAndFeel::semiBoldTypeface()
 {
     static const juce::Typeface::Ptr typeface = juce::Typeface::createSystemTypefaceFor (
         BinaryData::IBMPlexSansSemiBold_ttf, (size_t) BinaryData::IBMPlexSansSemiBold_ttfSize);
+    jassert (typeface != nullptr);
     return typeface;
+}
+
+juce::Font PanelLookAndFeel::fontFor (juce::Typeface::Ptr typeface, float height)
+{
+    // "FontOptions (height).withTypeface (typeface)" - the obvious way to
+    // write this - trips withTypeface()'s own internal jassert on every
+    // single call: FontOptions(height) already carries a non-empty default
+    // "Regular" style (from Font::plain), and withTypeface() asserts that
+    // style is empty before it discards it in favour of the typeface's own.
+    // Confirmed via cdb (see cdb-headless-assertion-check in memory) that the
+    // typeface argument itself is never null when this fires - the assert is
+    // about the discarded style field, not a load failure. Building from the
+    // typeface first sidesteps it entirely: that constructor populates name/
+    // style from the typeface itself, so nothing is later overwritten.
+    if (typeface == nullptr)
+        return juce::Font (juce::FontOptions (height));
+
+    return juce::Font (juce::FontOptions (typeface).withHeight (height));
 }
 
 namespace
@@ -36,7 +59,7 @@ namespace
     // typeface and weight only need to change here.
     juce::Font uiFont (float height)
     {
-        return juce::Font (juce::FontOptions (height).withTypeface (PanelLookAndFeel::regularTypeface()));
+        return PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), height);
     }
 }
 

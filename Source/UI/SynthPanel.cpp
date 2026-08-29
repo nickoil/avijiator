@@ -38,12 +38,12 @@ namespace
     // with the exact same Font it was drawn with.
     juce::Font markFont()
     {
-        return juce::Font (juce::FontOptions (24.0f).withTypeface (PanelLookAndFeel::semiBoldTypeface()));
+        return PanelLookAndFeel::fontFor (PanelLookAndFeel::semiBoldTypeface(), 24.0f);
     }
 
     juce::Font tagFont()
     {
-        return juce::Font (juce::FontOptions (18.0f).withTypeface (PanelLookAndFeel::regularTypeface()));
+        return PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 18.0f);
     }
 
     // Font no longer carries string-width measurement directly in this JUCE
@@ -305,7 +305,7 @@ void SynthPanel::StepCell::paint (juce::Graphics& g)
         const auto pitchLog2Hz = loadStepValue (&VoiceParameters::stepPitchLog2Hz, index, *parameters);
 
         g.setColour (gateOn ? PanelLookAndFeel::text : PanelLookAndFeel::textDim);
-        g.setFont (juce::Font (juce::FontOptions (11.0f).withTypeface (PanelLookAndFeel::regularTypeface())));
+        g.setFont (PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 11.0f));
         g.drawText (noteNameForMidiNote (midiNoteForPitchLog2Hz (pitchLog2Hz)),
                     bounds.toNearestInt(), juce::Justification::centred);
     }
@@ -507,7 +507,7 @@ void SynthPanel::PianoKey::paint (juce::Graphics& g)
 
     // Note name, bottom-anchored - documents/ui-mockup's .wk label spot.
     g.setColour (PanelLookAndFeel::textDim);
-    g.setFont (juce::Font (juce::FontOptions (9.0f).withTypeface (PanelLookAndFeel::regularTypeface())));
+    g.setFont (PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 9.0f));
     g.drawText (noteName, bounds.reduced (2.0f, 4.0f), juce::Justification::centredBottom);
 }
 
@@ -530,7 +530,7 @@ SynthPanel::PianoKeyboard::PianoKeyboard()
     {
         letter.setJustificationType (juce::Justification::centred);
         letter.setColour (juce::Label::textColourId, PanelLookAndFeel::textDim);
-        letter.setFont (juce::Font (juce::FontOptions (11.0f).withTypeface (PanelLookAndFeel::regularTypeface())));
+        letter.setFont (PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 11.0f));
         addAndMakeVisible (letter);
     }
 }
@@ -618,13 +618,13 @@ SynthPanel::OctaveControl::OctaveControl()
 
     readout.setJustificationType (juce::Justification::centred);
     readout.setColour (juce::Label::textColourId, PanelLookAndFeel::textDim);
-    readout.setFont (juce::Font (juce::FontOptions (13.0f).withTypeface (PanelLookAndFeel::regularTypeface())));
+    readout.setFont (PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 13.0f));
 
     for (auto* shortcut : { &upShortcut, &downShortcut })
     {
         shortcut->setJustificationType (juce::Justification::centred);
         shortcut->setColour (juce::Label::textColourId, PanelLookAndFeel::textDim);
-        shortcut->setFont (juce::Font (juce::FontOptions (11.0f).withTypeface (PanelLookAndFeel::regularTypeface())));
+        shortcut->setFont (PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 11.0f));
         addAndMakeVisible (*shortcut);
     }
     upShortcut.setText (".", juce::dontSendNotification);

@@ -285,23 +285,30 @@ Build/validate everything here before touching Android.
 
 ### App housekeeping (not numbered — no reordering)
 
-- [ ] **Fix silent font-loading failure** — `PanelLookAndFeel::regularTypeface()`
-      / `semiBoldTypeface()` (`Source/UI/PanelLookAndFeel.cpp:19-28`) call
-      `juce::Typeface::createSystemTypefaceFor(...)` and pass the result
-      straight into `.withTypeface(...)` (`PanelLookAndFeel.cpp:39`) with no
-      null check. Found 2026-08-27 via a CLI debugger (`cdb.exe`, installed
-      this session specifically to verify Debug self-tests headlessly —
-      `jassert` only breaks with a debugger attached, and a plain launch had
-      never been able to catch this): JUCE's own assertion at
-      `fonts/juce_FontOptions.h:138` fires on **every repaint** (~250 times
-      in a 20-second run), meaning `createSystemTypefaceFor` has been
-      returning null since item 6 shipped. Nothing crashes because JUCE
-      falls back to a default system font silently — so the panel has
-      likely been rendering with the wrong typeface (not the embedded
-      `AvijiatorFonts` one) with no visible symptom. Likely cause: a
-      BinaryData reference or embedded font resource mismatch in
-      `AvijiatorFonts`, not yet investigated further — out of scope for
-      whichever numbered item is active when this is picked up
+- [x] **Fix silent font-loading failure** — Found 2026-08-27 via `cdb.exe`:
+      JUCE's assertion at `fonts/juce_FontOptions.h:138` fired on every
+      repaint (~250 times in a 20s run). Original note (written before
+      investigation) guessed this meant `createSystemTypefaceFor` was
+      returning null. **That guess was wrong** — fixed 2026-08-29 after
+      checking the actual assert (`x == nullptr || style.isEmpty()`) and
+      confirming with cdb (breaking on the assert and inspecting the `x`
+      argument directly) that the typeface pointer was always non-null. The
+      real cause: every call site built fonts as
+      `FontOptions(height).withTypeface(typeface)` — `FontOptions(height)`
+      already carries a non-empty default "Regular" style (from
+      `Font::plain`), which `withTypeface()` asserts should be empty before
+      silently discarding it. The embedded IBM Plex Sans fonts were loading
+      correctly the whole time; this was a noisy but harmless Debug-only
+      assertion, not a rendering bug. Fix: added
+      `PanelLookAndFeel::fontFor(typeface, height)`, which builds
+      `FontOptions(typeface).withHeight(height)` instead (no field to
+      discard), and switched all 8 call sites (`PanelLookAndFeel.cpp`,
+      `SynthPanel.cpp`) to use it. Also added `jassert(typeface != nullptr)`
+      inside `regularTypeface()`/`semiBoldTypeface()` so a *genuine* future
+      load failure (e.g. a real BinaryData/resource mismatch) fails loudly
+      instead of silently falling back, which is what this item's title
+      actually asked for. Verified clean via the cdb self-test (0 assertion
+      hits, down from ~250) after a rebuild.
 - [ ] **Remember audio/MIDI device settings across restarts** — currently
       `setAudioChannels(0, 2)` picks a default device on every launch (Windows
       falls back to WASAPI unless ASIO is re-selected by hand each time), and

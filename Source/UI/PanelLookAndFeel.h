@@ -47,6 +47,14 @@ public:
     static juce::Typeface::Ptr regularTypeface();
     static juce::Typeface::Ptr semiBoldTypeface();
 
+    // The one correct way to build a Font from one of the two typefaces
+    // above at a given height - see the .cpp for why "FontOptions(height)
+    // .withTypeface(...)" (the obvious way to write this) is wrong: it
+    // trips FontOptions' own internal assertion on every call. Also the
+    // null-typeface fallback path, so a genuine embedded-font load failure
+    // degrades to the system default font instead of crashing.
+    static juce::Font fontFor (juce::Typeface::Ptr typeface, float height);
+
     // The 14pt Regular every knob/combo-box caption uses - see getLabelFont's
     // comment on why callers must now ask for this explicitly rather than
     // relying on it as a silent LookAndFeel default.
