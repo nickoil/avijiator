@@ -4,6 +4,7 @@
 #include <atomic>
 
 #include "Lfo.h"
+#include "NoteEvent.h"
 #include "NoteStack.h"
 #include "StepClock.h"
 
@@ -55,6 +56,20 @@ enum class EnvelopeDestination : int { Filter = 0, Amp = 1, Both = 2 };
 */
 struct VoiceParameters
 {
+    // Housekeeping (documents/TODO.md): every other field in this struct gets
+    // its default from an in-class initializer, but stepPitchLog2Hz can't -
+    // an array of std::atomic<float> has no way to aggregate-init every
+    // element to the same NON-zero value. This constructor exists for that
+    // one field alone; everything else still uses in-class initializers as
+    // normal. See stepPitchLog2Hz's own comment for why 0.0f (silence-range
+    // pitch, an artifact of zero-init) was the wrong default in the first
+    // place.
+    VoiceParameters()
+    {
+        for (auto& step : stepPitchLog2Hz)
+            step.store (pitchLog2HzForMidiNote (defaultStepMidiNote), std::memory_order_relaxed);
+    }
+
     // NOTE: there is no pitch parameter here any more. Pitch now arrives as
     // note events through NoteRouter's FIFOs and is owned by SynthVoice's
     // Glide, not set from the UI - see documents/note-handling-design.md
@@ -234,6 +249,15 @@ struct VoiceParameters
     // they raced, each individual atomic store is still well-defined - just
     // documented here because "which thread writes this" is otherwise a safe
     // assumption everywhere else in this file.
+    //
+    // Defaults to C2 (see the constructor above), not the array's own 0.0f
+    // zero-init - matches SynthPanel::noteNameForMidiNote's octave anchor
+    // (MIDI 48 == "C3"), so C2 == MIDI 36. A freshly-cleared step used to
+    // default to log2Hz(0.0f), a pitch far below C1 that only ever mattered
+    // if the step's gate was hand-turned on without also setting its pitch -
+    // housekeeping fix, documents/TODO.md.
+    static constexpr int defaultStepMidiNote = 36; // C2
+
     std::array<std::atomic<float>, seqMaxSteps> stepPitchLog2Hz {};
 
     // 0 = rest, 1 = gate on. int, not bool: std::atomic<bool> is not

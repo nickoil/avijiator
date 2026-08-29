@@ -69,6 +69,14 @@ namespace
         return (int) std::lround ((double) (pitchLog2Hz - 8.78136f) * 12.0) + 69;
     }
 
+    // StepCell::mouseDrag's pitch range, in this project's octave-naming
+    // convention (noteNameForMidiNote below anchors MIDI 48 as "C3", so C1 is
+    // two octaves down and C8 five octaves up). Housekeeping fix
+    // (documents/TODO.md): an unbounded drag could previously push a step's
+    // pitch arbitrarily far in either direction.
+    constexpr int minStepMidiNote = 24;  // C1
+    constexpr int maxStepMidiNote = 108; // C8
+
     // "C3" for MIDI 48, matching SynthPanel::keyboardBaseNoteNumber's own
     // octave anchor exactly (setOctaveShift uses the identical convention) -
     // duplicated as a literal rather than reaching into that private
@@ -366,8 +374,10 @@ void SynthPanel::StepCell::mouseDrag (const juce::MouseEvent& e)
         constexpr float pixelsPerSemitone = 8.0f;
         const auto semitoneDelta = (int) std::round (deltaY / pixelsPerSemitone);
         const auto startMidiNote = midiNoteForPitchLog2Hz (dragStartValue);
+        const auto newMidiNote = juce::jlimit (minStepMidiNote, maxStepMidiNote,
+                                                startMidiNote + semitoneDelta);
         storeStepValue (&VoiceParameters::stepPitchLog2Hz, index,
-                         pitchLog2HzForMidiNote (startMidiNote + semitoneDelta), *parameters);
+                         pitchLog2HzForMidiNote (newMidiNote), *parameters);
     }
     else
     {

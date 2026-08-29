@@ -239,12 +239,18 @@ void runStepSequencerPatternSelfTest()
     {
         VoiceParameters params;
 
+        // Pitch is the one exception to "zero-init is silent": stepGateOn off
+        // is what actually keeps a fresh pattern silent, so the housekeeping
+        // fix that gave stepPitchLog2Hz a real default (C2, VoiceParameters'
+        // own constructor) doesn't change what this block is proving.
+        const auto defaultPitch = pitchLog2HzForMidiNote (VoiceParameters::defaultStepMidiNote);
+
         for (int i = 0; i < seqMaxSteps; ++i)
         {
             jassert (params.stepGateOn[(size_t) i].load() == 0);
             jassert (params.stepAccent[(size_t) i].load() == 0);
             jassert (params.stepSlide[(size_t) i].load() == 0);
-            jassert (params.stepPitchLog2Hz[(size_t) i].load() == 0.0f);
+            jassert (params.stepPitchLog2Hz[(size_t) i].load() == defaultPitch);
             jassert (params.stepCutoffNorm[(size_t) i].load() == 0.0f);
             jassert (params.stepResonanceNorm[(size_t) i].load() == 0.0f);
         }

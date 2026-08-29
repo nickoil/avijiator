@@ -46,8 +46,13 @@ struct NoteEvent
     source converts identically.
 
     log2(440) = 8.78136, and MIDI note 69 is A4 = 440Hz by definition.
+
+    constexpr, not just inline: VoiceParameters' step-sequencer default
+    (housekeeping, documents/TODO.md) computes a default step pitch from a
+    named MIDI note at compile time rather than hand-carrying the resulting
+    float literal.
 */
-inline float pitchLog2HzForMidiNote (int midiNoteNumber) noexcept
+constexpr float pitchLog2HzForMidiNote (int midiNoteNumber) noexcept
 {
     return 8.78136f + (float) (midiNoteNumber - 69) / 12.0f;
 }
