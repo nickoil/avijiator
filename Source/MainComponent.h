@@ -77,6 +77,10 @@ private:
     void handleIncomingMidiMessage (juce::MidiInput* source,
                                      const juce::MidiMessage& message) override;
 
+    // First-launch-only fallback: enables everything currently plugged in.
+    // Once a device state has been saved (see appProperties below), restoring
+    // it via setAudioChannels' XmlElement argument restores exactly the MIDI
+    // inputs that were enabled last session instead, and this is skipped.
     void enableAllMidiInputs();
 
     // Opens JUCE's device selector. Without it the app just takes whatever
@@ -90,6 +94,11 @@ private:
 
 private:
     //==============================================================================
+    // Persists deviceManager's audio/MIDI setup across restarts - see
+    // documents/TODO.md's "Remember audio/MIDI device settings" item.
+    // Loaded in the constructor, saved in the destructor.
+    juce::ApplicationProperties appProperties;
+
     SynthVoice voice;
 
     // Owns the event FIFOs and the note-priority stack. Input sources push

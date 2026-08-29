@@ -6,6 +6,20 @@
 //==============================================================================
 namespace
 {
+    // Where the saved audio/MIDI device state (see appProperties) lives on
+    // disk - documents/TODO.md's "Remember audio/MIDI device settings" item.
+    juce::PropertiesFile::Options devicePropertiesOptions()
+    {
+        juce::PropertiesFile::Options options;
+        options.applicationName     = "Avijiator";
+        options.filenameSuffix      = "settings";
+        options.folderName          = "Avijiator";
+        options.osxLibrarySubFolder = "Application Support";
+        return options;
+    }
+
+    constexpr const char* audioDeviceStateKey = "audioDeviceState";
+
     // Split out from the callback so it can be tested without MIDI hardware -
     // the conversion is the part most likely to be subtly wrong, and wrong
     // here is silent. Returns false for anything that isn't a note message.
@@ -179,10 +193,25 @@ MainComponent::MainComponent()
     // (Main.cpp's setResizable), and resized() below scales the panel to fit
     // whatever size it becomes from here.
     setSize (SynthPanel::designWidth, SynthPanel::designHeight);
-    setAudioChannels (0, 2); // no input, stereo out
 
-    // After setAudioChannels, so the device manager is initialised.
-    enableAllMidiInputs();
+    appProperties.setStorageParameters (devicePropertiesOptions());
+    std::unique_ptr<juce::XmlElement> savedDeviceState (
+        appProperties.getUserSettings()->getXmlValue (audioDeviceStateKey));
+
+    // Passing the saved state (nullptr on first-ever launch) restores the
+    // same audio device *and* the same set of enabled MIDI inputs as last
+    // session - see documents/TODO.md's "Remember audio/MIDI device
+    // settings" item.
+    setAudioChannels (0, 2, savedDeviceState.get());
+
+    if (savedDeviceState == nullptr)
+        enableAllMidiInputs(); // nothing saved yet - fall back to today's behaviour
+
+    // An empty identifier registers as a catch-all across every ENABLED
+    // input, so devices switched on later in the settings panel are picked up
+    // without re-registering per device. Needed either way, whether the
+    // enabled set came from enableAllMidiInputs() above or from savedDeviceState.
+    deviceManager.addMidiInputDeviceCallback ({}, this);
 }
 
 void MainComponent::enableAllMidiInputs()
@@ -193,11 +222,6 @@ void MainComponent::enableAllMidiInputs()
     // can untick any that aren't wanted.
     for (const auto& device : juce::MidiInput::getAvailableDevices())
         deviceManager.setMidiInputDeviceEnabled (device.identifier, true);
-
-    // An empty identifier registers as a catch-all across every ENABLED
-    // input, so devices switched on later in the settings panel are picked up
-    // without re-registering per device.
-    deviceManager.addMidiInputDeviceCallback ({}, this);
 }
 
 void MainComponent::handleIncomingMidiMessage (juce::MidiInput* /*source*/,
@@ -268,6 +292,14 @@ void MainComponent::visibilityChanged()
 
 MainComponent::~MainComponent()
 {
+    // Snapshot the live audio/MIDI device setup before any of the teardown
+    // below can change it, so next launch restores exactly what was active
+    // this session - documents/TODO.md's "Remember audio/MIDI device
+    // settings" item.
+    appProperties.getUserSettings()->setValue (audioDeviceStateKey,
+                                                deviceManager.createStateXml().get());
+    appProperties.saveIfNeeded();
+
     // Unregister BEFORE shutdownAudio, for the same reason shutdownAudio is
     // called here at all: a MIDI message arriving mid-destruction would call
     // into a partially destroyed object.

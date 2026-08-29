@@ -309,22 +309,24 @@ Build/validate everything here before touching Android.
       instead of silently falling back, which is what this item's title
       actually asked for. Verified clean via the cdb self-test (0 assertion
       hits, down from ~250) after a rebuild.
-- [ ] **Remember audio/MIDI device settings across restarts** — currently
-      `setAudioChannels(0, 2)` picks a default device on every launch (Windows
-      falls back to WASAPI unless ASIO is re-selected by hand each time), and
-      `enableAllMidiInputs()` just re-enables whatever's currently plugged in
-      rather than recalling what was on last time. Nothing is persisted at
-      all today — confirmed by grep, zero hits for `createStateXml`,
-      `ApplicationProperties`, `PropertiesFile` anywhere in `Source/`.
-      Fix is standard JUCE, not novel: `AudioDeviceManager::createStateXml()`
-      to save, `initialise (ins, outs, savedXml, true)` to restore (replacing
-      the convenience `setAudioChannels` call), stored via
-      `juce::ApplicationProperties`. Load in `MainComponent`'s constructor,
-      save in its destructor or `AvijiatorApplication::shutdown()`.
-      Message-thread/startup-time only — no audio-thread or DSP involvement,
-      doesn't block or depend on any numbered item above. Also: link
-      `juce_data_structures` explicitly in `CMakeLists.txt` (currently only
-      pulled in transitively via `juce_gui_extra`)
+- [x] **Remember audio/MIDI device settings across restarts** — done
+      2026-08-29. Turned out simpler than this note's original sketch:
+      `AudioAppComponent::setAudioChannels` already takes an optional
+      `const XmlElement*` third argument that does both the
+      `deviceManager.initialise(...)` call *and* the `AudioSourcePlayer`
+      wiring `setAudioChannels` normally does, so the fix was passing the
+      saved state straight into the existing call rather than swapping it
+      for a raw `deviceManager.initialise(...)`. Saved/loaded via
+      `juce::ApplicationProperties` (`MainComponent`'s constructor loads,
+      destructor saves via `createStateXml()`), `juce_data_structures` now
+      linked explicitly in `CMakeLists.txt`. `enableAllMidiInputs()` is now a
+      first-launch-only fallback — JUCE's saved device XML already restores
+      which MIDI inputs were enabled, so it's skipped once state exists.
+      Verified end-to-end (not just built): launched, quit gracefully,
+      confirmed `%APPDATA%/Avijiator/Avijiator.settings` was written with
+      the live `DEVICESETUP`/`MIDIINPUT` XML; relaunched and quit again,
+      confirmed the file round-tripped cleanly with no corruption or
+      duplication. cdb self-test clean (0 assertions) both before and after.
 - [ ] **Step sequencer's default pitch is a real but inaudible frequency,
       not "off"** — `VoiceParameters::stepPitchLog2Hz` (`Source/DSP/VoiceParameters.h`)
       is a zero-initialized `std::array`, the same convention every other

@@ -85,7 +85,8 @@ target_compile_definitions(Avijiator
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Avijiator,JUCE_VERSION>")
 
 # Module set: audio basics/devices/formats/utils for the standalone audio
-# app + MIDI input, dsp for filter/oscillator building blocks, gui_basics/
+# app + MIDI input, data_structures for ApplicationProperties (device-setting
+# persistence), dsp for filter/oscillator building blocks, gui_basics/
 # gui_extra for the control UI (item 6). Their own dependencies (core,
 # events, graphics, ...) are pulled in transitively.
 target_link_libraries(Avijiator
@@ -95,6 +96,7 @@ target_link_libraries(Avijiator
         juce::juce_audio_devices
         juce::juce_audio_formats
         juce::juce_audio_utils
+        juce::juce_data_structures
         juce::juce_dsp
         juce::juce_gui_basics
         juce::juce_gui_extra
