@@ -42,7 +42,8 @@ int StepSequencer::gateSamplesForStep (double samplesPerStep, float gateFraction
     return juce::jlimit (1, stepSamples - 1, gate);
 }
 
-void StepSequencer::process (SynthVoice& voice, float* output, int numSamples) noexcept
+void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liveResolution,
+                              float* output, int numSamples) noexcept
 {
     auto& parameters = voice.getParameters();
 
@@ -58,6 +59,11 @@ void StepSequencer::process (SynthVoice& voice, float* output, int numSamples) n
     // A FRACTION of the step, not a time, same reasoning as arpGateLength.
     const auto gateFraction = juce::jlimit (minGateFraction, maxGateFraction,
                                              parameters.seqGateLength.load (std::memory_order_relaxed));
+
+    // Discrete switch, raw once per block - same treatment as every other
+    // on/off atomic read above. Build step 7: documents/step-sequencer-design.md
+    // section 8.
+    const auto recordArmed = parameters.seqRecordArmed.load (std::memory_order_relaxed) != 0;
 
     auto offset = 0;
 
@@ -101,6 +107,25 @@ void StepSequencer::process (SynthVoice& voice, float* output, int numSamples) n
             // rather than read-and-discarded.
             voice.setStepFilterModulation (parameters.stepCutoffNorm[index].load (std::memory_order_relaxed),
                                             parameters.stepResonanceNorm[index].load (std::memory_order_relaxed));
+
+            // Build step 7 (pitch entry): overwrite THIS step's pitch/gate
+            // with whatever is currently held, before reading them back for
+            // playback two lines down - so a freshly recorded step sounds
+            // its own new value at once rather than one lap late. Deliberately
+            // only these two fields - stepAccent/stepSlide are left exactly
+            // as they were, still hand-edited from the grid only. No key
+            // held writes a REST (gateOn = false), overwriting whatever gate
+            // state the step had before - documents/step-sequencer-design.md
+            // section 8's settled answer to "no key pressed at a boundary".
+            // Nothing here ever clears seqRecordArmed, so a pattern shorter
+            // than the phrase being played keeps being re-captured lap after
+            // lap for as long as it stays on - the settled "wraps, does not
+            // auto-stop" answer, for free.
+            if (recordArmed)
+            {
+                parameters.stepPitchLog2Hz[index].store (liveResolution.pitchLog2Hz, std::memory_order_relaxed);
+                parameters.stepGateOn[index].store (liveResolution.isSounding ? 1 : 0, std::memory_order_relaxed);
+            }
 
             const auto gateOn = parameters.stepGateOn[index].load (std::memory_order_relaxed) != 0;
 
@@ -400,9 +425,15 @@ namespace
 
         // process() splits numSamples at every step boundary internally -
         // this just forwards to it against the bench's own voice.
-        void render (float* output, int numSamples) noexcept
+        //
+        // `liveResolution` defaults to not-sounding (NoteStack::Resolution's
+        // own default construction) so every call site written before build
+        // step 7 - none of which passes one - still exercises exactly the
+        // "recording off, or recording on with nothing held" path, unchanged.
+        void render (float* output, int numSamples,
+                     const NoteStack::Resolution& liveResolution = {}) noexcept
         {
-            seq.process (voice, output, numSamples);
+            seq.process (voice, liveResolution, output, numSamples);
         }
 
     private:
@@ -423,6 +454,7 @@ namespace
 
         return peak;
     }
+
 }
 
 void runStepSequencerRenderSelfTest()
@@ -813,6 +845,133 @@ void runSeqTransitionSelfTest()
         rig.releaseKey();
         rig.run (4);
         jassert (rig.run (4) <= silence);       // nothing stuck from the interrupted step
+    }
+}
+
+//==============================================================================
+namespace
+{
+    // Build step 7's own helper - a "someone is playing this note" stand-in,
+    // matching NoteStack::Resolution's field order (isSounding, noteNumber,
+    // pitchLog2Hz, velocity). The note number and velocity are never read by
+    // recording (only pitch and gate are captured - see process()'s own
+    // comment), so both are fixed, deliberately-arbitrary values here.
+    NoteStack::Resolution soundingAt (float pitchLog2Hz) noexcept
+    {
+        return { true, 60, pitchLog2Hz, 0.8f };
+    }
+}
+
+void runStepRecordSelfTest()
+{
+    // One step at 300BPM/1-32 at 16kHz, same rig and same exact-sample-count
+    // reasoning as runStepSequencerRenderSelfTest.
+    constexpr int samplesPerStep = 400;
+
+    //==========================================================================
+    // DISARMED: a sounding resolution reaches process() every block, exactly
+    // as it would while actually recording, but seqRecordArmed is off - the
+    // gate this whole feature hangs off. Pattern storage must be untouched,
+    // proven byte-identical across the WHOLE pattern rather than just the
+    // step visited, so a bug that wrote to the wrong index would still be
+    // caught.
+    {
+        SequencerRenderRig rig;
+
+        auto& p = rig.parameters();
+        std::array<float, seqMaxSteps> pitchBefore {};
+        std::array<int, seqMaxSteps> gateBefore {};
+        for (int i = 0; i < seqMaxSteps; ++i)
+        {
+            pitchBefore[(size_t) i] = p.stepPitchLog2Hz[(size_t) i].load();
+            gateBefore[(size_t) i] = p.stepGateOn[(size_t) i].load();
+        }
+
+        std::array<float, samplesPerStep * 3> buffer {};
+        rig.render (buffer.data(), (int) buffer.size(), soundingAt (9.5f));
+
+        for (int i = 0; i < seqMaxSteps; ++i)
+        {
+            jassert (p.stepPitchLog2Hz[(size_t) i].load() == pitchBefore[(size_t) i]);
+            jassert (p.stepGateOn[(size_t) i].load() == gateBefore[(size_t) i]);
+        }
+    }
+
+    //==========================================================================
+    // ARMED + SOUNDING: the current step's pitch and gate are overwritten
+    // with the live resolution's values.
+    {
+        SequencerRenderRig rig;
+        rig.parameters().seqRecordArmed.store (1);
+
+        std::array<float, samplesPerStep> buffer {};
+        rig.render (buffer.data(), (int) buffer.size(), soundingAt (9.5f));
+
+        jassert (std::abs (rig.parameters().stepPitchLog2Hz[0].load() - 9.5f) < 1.0e-6f);
+        jassert (rig.parameters().stepGateOn[0].load() == 1);
+    }
+
+    //==========================================================================
+    // ARMED + NOTHING HELD: records a REST, overwriting a step that was
+    // previously gated - documents/step-sequencer-design.md section 8's
+    // settled answer to "no key pressed at a boundary" (leave gateOn false),
+    // proven here as an actual OVERWRITE, not just "already false".
+    {
+        SequencerRenderRig rig;
+        rig.setStep (0, 8.0f, true, false, false); // pre-seed step 0 gated
+        rig.parameters().seqRecordArmed.store (1);
+
+        std::array<float, samplesPerStep> buffer {};
+        rig.render (buffer.data(), (int) buffer.size()); // default resolution: not sounding
+
+        jassert (rig.parameters().stepGateOn[0].load() == 0);
+    }
+
+    //==========================================================================
+    // ACCENT AND SLIDE SURVIVE: recording only ever touches pitch and gate -
+    // a step's own accent/slide flags, set by hand from the grid, must not be
+    // disturbed by a live-record pass over the same step.
+    {
+        SequencerRenderRig rig;
+        rig.setStep (0, 8.0f, false, true, true); // accent + slide pre-set, gate off
+        rig.parameters().seqRecordArmed.store (1);
+
+        std::array<float, samplesPerStep> buffer {};
+        rig.render (buffer.data(), (int) buffer.size(), soundingAt (9.0f));
+
+        jassert (rig.parameters().stepAccent[0].load() == 1);
+        jassert (rig.parameters().stepSlide[0].load() == 1);
+        // Gate and pitch DID change, same proof as the ARMED + SOUNDING case
+        // above - confirms this run actually recorded rather than trivially
+        // leaving everything alone.
+        jassert (rig.parameters().stepGateOn[0].load() == 1);
+        jassert (std::abs (rig.parameters().stepPitchLog2Hz[0].load() - 9.0f) < 1.0e-6f);
+    }
+
+    //==========================================================================
+    // WRAPS RATHER THAN AUTO-STOPPING: documents/step-sequencer-design.md
+    // section 8's other open question. A short, 2-step pattern so a full lap
+    // is cheap to render; step 0 is visited once per lap (global step indices
+    // 0 and 2). First call records resolution A into it; second call - AFTER
+    // the wrap - must have overwritten it with resolution B, and
+    // seqRecordArmed must still read as on, since nothing in process() ever
+    // clears it.
+    {
+        SequencerRenderRig rig;
+        rig.parameters().seqPatternLength.store (2);
+        rig.parameters().seqRecordArmed.store (1);
+
+        std::array<float, samplesPerStep> firstStep {};
+        rig.render (firstStep.data(), (int) firstStep.size(), soundingAt (7.0f));
+        jassert (std::abs (rig.parameters().stepPitchLog2Hz[0].load() - 7.0f) < 1.0e-6f);
+
+        // Two more step boundaries: global step 1 (pattern index 1), then
+        // global step 2 - pattern index 0 again, the wrap.
+        std::array<float, samplesPerStep * 2> nextTwoSteps {};
+        rig.render (nextTwoSteps.data(), (int) nextTwoSteps.size(), soundingAt (11.0f));
+
+        jassert (std::abs (rig.parameters().stepPitchLog2Hz[0].load() - 11.0f) < 1.0e-6f);
+        jassert (rig.parameters().seqRecordArmed.load() == 1);
     }
 }
 

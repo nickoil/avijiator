@@ -4,6 +4,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include "DSP/NoteStack.h"
 #include "DSP/StepClock.h"
 
 class SynthVoice;
@@ -62,8 +63,19 @@ public:
         close - identical loop SHAPE to Arpeggiator::process
         (Arpeggiator.cpp:165-331), copied rather than shared per StepClock.h's
         own comment on why. Reads the pattern straight out of VoiceParameters
-        by index rather than taking a HeldNotes span - the step sequencer has
-        no keyboard input of its own, unlike the arp.
+        by index rather than taking a HeldNotes span for PLAYBACK - the step
+        sequencer has no keyboard input of its own, unlike the arp.
+
+        `liveResolution` IS keyboard input, but for RECORDING, not playback -
+        build step 7 (documents/step-sequencer-design.md section 8). It is
+        the router's own priority-resolved pick (NoteStack::getCurrentResolution),
+        sampled once per block by the caller exactly like the arp's own
+        liveNotes parameter - block-granular key events, sample-accurate
+        steps, same split as everywhere else in this codebase. Consulted only
+        while VoiceParameters::seqRecordArmed is on; ignored entirely
+        otherwise, so passing a stale or default-constructed (not sounding)
+        resolution when nothing is being recorded is always safe - see
+        runStepSequencerRenderSelfTest's rig, which does exactly that.
 
         Build step 2 (documents/step-sequencer-design.md section 3): rest and
         gate handling, slide via the arp's Tie idea ("skip the force-close
@@ -75,8 +87,10 @@ public:
         pushes both into SynthVoice::setStepFilterModulation right here,
         rather than reading and discarding them. Build step 6 adds one more
         write at the same point: VoiceParameters::currentStepForUi, the
-        pattern grid's playhead - the only field in this class that exists
-        for the UI thread rather than the DSP.
+        pattern grid's playhead. Build step 7 adds a write BEFORE the
+        existing stepPitchLog2Hz/stepGateOn reads, at the same point, so a
+        freshly recorded step plays back immediately rather than one step
+        late - see the .cpp.
 
         Writes into output, does not add to it - same contract as
         SynthVoice::renderNextBlock and Arpeggiator::process.
@@ -87,7 +101,8 @@ public:
         iterations is bounded by numSamples / minSamplesPerStep + 2, same
         termination proof as the arp's loop.
     */
-    void process (SynthVoice& voice, float* output, int numSamples) noexcept;
+    void process (SynthVoice& voice, const NoteStack::Resolution& liveResolution,
+                  float* output, int numSamples) noexcept;
 
     /*
         Stop driving the voice, leaving it SILENT.
@@ -242,5 +257,31 @@ void runStepSequencerRenderSelfTest();
     any one of them, same reasoning as that test's own header comment.
 */
 void runSeqTransitionSelfTest();
+
+/*
+    Debug-only self-test, run once at startup.
+
+    Covers what build step 7 actually adds: process()'s new `liveResolution`
+    parameter and the record-arm write it gates
+    (documents/step-sequencer-design.md section 8). Same
+    SequencerRenderRig bench as runStepSequencerRenderSelfTest, extended with
+    an optional resolution argument on render() (default: not sounding, so
+    every existing call in that test is untouched and still exercises the
+    disarmed/no-op path). Proves, in order: disarmed recording touches
+    NOTHING even with a sounding resolution in hand (byte-identical pattern
+    storage before and after - the gate this whole feature hangs off);
+    armed recording writes a sounding resolution's pitch and gate into the
+    CURRENT step; armed recording writes a rest (gateOn = false) when nothing
+    is held, overwriting a step that was previously gated - this document's
+    settled answer to "what happens on a step with no key pressed"; accent
+    and slide survive being recorded over untouched, proving capture really
+    is scoped to pitch+gate only; and recording keeps re-capturing after a
+    full pass through a (deliberately short, for a fast test) pattern wraps
+    back to step 0, with seqRecordArmed still on afterwards - this document's
+    settled answer to "auto-stop or wrap": nothing here ever clears that
+    atomic, so wrapping is simply what an unconditionally-consulted flag
+    already does with no extra state.
+*/
+void runStepRecordSelfTest();
 
 #endif

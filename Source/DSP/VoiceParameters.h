@@ -224,13 +224,24 @@ struct VoiceParameters
 
     // Log2(Hz), same convention as pitch everywhere else in this file - so a
     // step's pitch sums in octaves with everything else already built that
-    // way.
+    // way. NORMALLY message-thread-written (a grid edit) like every other
+    // field in this block, but build step 7 (pitch entry) gives this ONE
+    // array a second writer: StepSequencer::process, on the AUDIO thread,
+    // while seqRecordArmed is on - see that atomic's own comment below and
+    // documents/step-sequencer-design.md section 8. Never written by both
+    // threads at the same instant in practice (recording a step and
+    // hand-editing it live are not a supported combination), and even if
+    // they raced, each individual atomic store is still well-defined - just
+    // documented here because "which thread writes this" is otherwise a safe
+    // assumption everywhere else in this file.
     std::array<std::atomic<float>, seqMaxSteps> stepPitchLog2Hz {};
 
     // 0 = rest, 1 = gate on. int, not bool: std::atomic<bool> is not
     // guaranteed lock-free on every platform, and every other discrete
     // switch in this struct (envelopeDestination, lfoWaveform, ...) already
-    // uses int for exactly that reason.
+    // uses int for exactly that reason. Same second-writer note as
+    // stepPitchLog2Hz just above - build step 7 writes this one from the
+    // audio thread too, in lockstep with it.
     std::array<std::atomic<int>, seqMaxSteps> stepGateOn {};
 
     // Realized as velocity into SynthVoice, not a separate depth path -
@@ -287,15 +298,44 @@ struct VoiceParameters
     // arpGateLength.
     std::atomic<float> seqGateLength { 0.5f };
 
-    // AUDIO -> UI, item 7 build step 6 - the one atomic in this whole struct
-    // that flows the OPPOSITE direction from every other member here.
-    // Written by StepSequencer::process (audio thread) at every step
-    // boundary while the sequencer owns the voice; read by SynthPanel's
+    // Item 7, build step 7 (pitch entry). Off on first load, same reasoning
+    // as seqEnabled - arming record on startup would be a surprise. While
+    // this is on AND the sequencer owns the voice (seqEnabled also on -
+    // recording has no effect otherwise, since only StepSequencer::process
+    // ever reads it, and that only runs while Seq is the voice owner), the
+    // router's currently-held-note resolution (the same priority-resolved
+    // pick Keys itself would sound - NoteStack::getCurrentResolution, sampled
+    // once per block same as the arp's own liveNotes) is written into
+    // stepPitchLog2Hz/stepGateOn at every step boundary, overwriting
+    // whatever was stored there before it is read back for that same step's
+    // playback. See documents/step-sequencer-design.md section 8 and
+    // StepSequencer::process's own comment for the two build-time decisions
+    // that document left open:
+    //   - no key held at a boundary records a REST (gateOn = false), not a
+    //     hold-over of the previous step's note;
+    //   - a note held across several step boundaries is NOT inferred as a
+    //     tie/slide - each boundary it is still down records as its own
+    //     freshly-gated (retriggering) step, because recording only ever
+    //     touches THIS field and stepGateOn, never stepSlide/stepAccent - the
+    //     grid is still where slide gets set, by hand, same as accent.
+    // Deliberately does NOT auto-disarm at the end of one pass through the
+    // pattern - recording WRAPS, re-capturing over the top for as long as
+    // this stays on, until the user turns it off. That is what "wrap" or
+    // "auto-stop" resolves to: the natural behaviour of a plain armed flag
+    // consulted every step boundary, with no extra state needed to get it.
+    std::atomic<int> seqRecordArmed { 0 };
+
+    // AUDIO -> UI. Written by StepSequencer::process (audio thread) at every
+    // step boundary while the sequencer owns the voice; read by SynthPanel's
     // StepGrid (a UI-thread Timer) to highlight the currently playing step
     // (documents/step-sequencer-design.md section 9). -1 means "not
     // currently playing" - StepSequencer::releaseVoice sets it back there on
     // every hand-over away from the sequencer, so a stale highlight can
-    // never survive the voice changing owners.
+    // never survive the voice changing owners. Introduced in item 7 build
+    // step 6 as "the one atomic in this whole struct that flows the OPPOSITE
+    // direction" - build step 7 above adds stepPitchLog2Hz/stepGateOn as a
+    // second, conditional case of the same direction, so this is no longer
+    // literally the only one, just the unconditional one.
     std::atomic<int> currentStepForUi { -1 };
 
     static_assert (std::atomic<float>::is_always_lock_free,

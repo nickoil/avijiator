@@ -248,10 +248,12 @@ const ChoiceSpec SynthPanel::seqChoiceSpecs[numSeqChoices] =
 };
 
 // Off on first load, same reasoning as arpToggleSpecs' "On" entry - the
-// instrument must not start sequencing notes nobody programmed.
+// instrument must not start sequencing notes nobody programmed (or, for
+// Record, start capturing over a pattern nobody armed it to).
 const ToggleSpec SynthPanel::seqToggleSpecs[numSeqToggles] =
 {
-    { "On", 0, &VoiceParameters::seqEnabled },
+    { "On",     0, &VoiceParameters::seqEnabled     },
+    { "Record", 0, &VoiceParameters::seqRecordArmed },
 };
 
 //==============================================================================
@@ -740,11 +742,13 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
 
     wireKnobs (outputKnobs, outputKnobSpecs, numOutputKnobs, outputSection);
 
-    // Item 7 build step 6. Cell order: On, Division, Pattern Length, Tempo,
-    // Gate, Lane - see the member comment in SynthPanel.h. On is added
-    // FIRST, same "toggle cell goes first" precedent as ARP's above.
-    attachToggle (seqOnToggle, seqToggleSpecs[0], params);
-    seqControlSection.addCell (seqOnCaption, seqOnToggle);
+    // Item 7 build steps 6-7. Cell order: On+Record, Division, Pattern
+    // Length, Tempo, Gate, Lane - see the member comment in SynthPanel.h.
+    // The toggle-stack cell is added FIRST, same "toggle cell goes first"
+    // precedent as ARP's above.
+    attachToggle (seqToggleStack.top, seqToggleSpecs[0], params);
+    attachToggle (seqToggleStack.bottom, seqToggleSpecs[1], params);
+    seqControlSection.addCell (seqToggleCaption, seqToggleStack);
 
     wireChoices (seqChoices, seqChoiceSpecs, numSeqChoices, seqControlSection);
 
@@ -986,9 +990,12 @@ void SynthPanel::resized()
     // needs to hit the 1240px budget exactly, only rows A/B did (section 3).
     {
         auto row = area.removeFromTop (PanelSection::heightForCells());
-        // +2 = the hand-wired Pattern Length and Lane cells - neither is a
-        // ChoiceSpec, see numSeqChoices' own comment in SynthPanel.h.
-        place (row, seqControlSection, numSeqToggles + numSeqChoices + numSeqKnobs + 2);
+        // 1 = the On/Record stacked cell (numSeqToggles is 2 controls but ONE
+        // cell - same "hardcode 1, don't use the toggle count" precedent as
+        // row B's arpSection line above). +2 = the hand-wired Pattern Length
+        // and Lane cells - neither is a ChoiceSpec, see numSeqChoices' own
+        // comment in SynthPanel.h.
+        place (row, seqControlSection, 1 + numSeqChoices + numSeqKnobs + 2);
     }
     area.removeFromTop (gap);
 

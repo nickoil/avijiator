@@ -125,242 +125,60 @@ Build/validate everything here before touching Android.
       architecture.md) are actually big enough to hit on a phone — no touch
       hardware exists in Stage A, real answer is Stage B item 9; whether the
       arrangement reads as being in the SH-101 family.
-- [ ] **7. Step sequencer (phase 2)** — 16-step pattern, per-step
+- [x] **7. Step sequencer (phase 2)** — 16-step pattern, per-step
       pitch/gate/accent/slide plus two per-step filter lanes (cutoff,
-      resonance), shared clock/trigger plumbing with the arp.
-      Design + build order: [step-sequencer-design.md](step-sequencer-design.md).
-      **Step 0 (design) done. Step 1 (clock + pattern storage) done:**
-      `StepSequencer` class (`Source/StepSequencer.h/.cpp`) owning its own
-      `StepClock` and the `stepIndex % patternLength` arithmetic, plus the
-      six per-step `VoiceParameters` arrays (pitch/gate/accent/slide + both
-      filter lanes) and five scalar atomics (`seqEnabled`, `seqDivision`,
-      `seqPatternLength`, `seqTempoBpm`, `seqGateLength`). `runStepSequencerPatternSelfTest`
-      checks storage read/write by index with no cross-array aliasing, the
-      pattern-index wrap (including a defensively clamped out-of-range
-      length), and rest-handling defaults.
-      **Step 2 (render loop) done:** `StepSequencer::process()` — the
-      two-deadline sub-block loop, copied (not shared) from
-      `Arpeggiator::process`'s shape per `StepClock.h`'s own comment on when
-      that becomes worth doing. Rest handling (advances the clock without
-      gating), slide via the arp's Tie idea (skip the force-close so
-      `SynthVoice` takes its legato branch), accent hardcoded to a fixed
-      elevated velocity (1.0 vs. 0.75 — depth routing is step 3), and both
-      filter lanes read every step boundary but not yet summed into any DSP
-      (step 5's job). Builds clean (Debug + Release, zero warnings).
-      `runStepSequencerRenderSelfTest` drives a real `SynthVoice` through a
-      fixed test pattern and checks actual rendered output (peak amplitude
-      and, for the inert lanes, byte-identical buffers) rather than
-      re-implementing the loop it's checking — same approach as
-      `runArpTransitionSelfTest`. Covers: an all-rest pattern stays silent
-      exactly (not approximately); the clock keeps grid phase through rests
-      (`stepIndex` advances even with nothing gated); a single gated step
-      among rests audibly sounds and then settles back to true silence
-      before the pattern wraps; cutoff/resonance are proven inert (identical
-      output at 0 vs. 1 — this test is *meant* to start failing once step 5
-      wires them in); accent is likewise proven inert at the time this test
-      was written (velocity wasn't routed anywhere yet); and slide is proven
-      to take the legato branch rather than force-closing, exercised via a
-      deliberate mid-gate tempo drop — the one scenario (documented in
-      `arpeggiator-design.md` section 3) where "skip the force-close" is
-      actually observable under the gate-fraction clamp's arithmetic.
-      **Not yet reachable from the real app** — no `StepSequencer` member on
-      `MainComponent`, no audio-path change, nothing playable by ear yet.
-      That hand-over (3-way arp/seq/keys arbitration) is step 4, built once
-      as the real thing rather than a throwaway stand-in now — see the
-      design doc section 6. Verified 2026-08-27 via `cdb.exe` (see
-      [cdb-headless-assertion-check memory] — installed later the same
-      session): a full run fired no assertion from any step-sequencer or
-      arp/note-router code, only the unrelated pre-existing font bug below.
-      **Step 3 (accent DSP) done:** two new `VoiceParameters` atomics,
-      `velocityToAmpDepth` (0..1, multiplicative) and
-      `velocityToCutoffDepthOctaves` (octaves, additive, reference point
-      velocity == 1.0), both defaulting to 0 (inert). Wired into
-      `SynthVoice.cpp`'s amp and cutoff summing points — `currentVelocity`,
-      captured since item 4 and never used, now actually reaches audio.
-      Because the new depths default to 0, build step 2's "accent proven
-      inert" self-test above **still passes** rather than starting to fail
-      as that comment predicted when it was written — accent isn't inert
-      because it's unwired any more, it's inert because nobody has turned
-      either knob up yet, same as every other modulation depth in this
-      codebase (`envToCutoffDepthOctaves`, `lfoToPitchDepthOctaves`, ...).
-      **No panel knob yet, by deliberate choice, not an oversight**: exposing
-      one means adding cells to `SynthPanel.cpp`'s VCF/ENV sections, and row
-      B's own comment there states its four sections' widths already fill
-      the panel's 1240px budget exactly — adding cells means rebalancing
-      that budget (`envRowWidthCompensation` and friends), which is real
-      layout surgery on an already-shipped (item 6), already-tuned screen.
-      That's what design doc build step 6 ("UI wiring... resize if needed")
-      is explicitly scoped for, so it's deferred there rather than done as a
-      side effect of a DSP step. Until then the new depths are reachable only
-      by hand-editing their atomic defaults or through
-      `runAccentDepthSelfTest` (`Source/DSP/SynthVoice.h/.cpp`) — **not yet
-      audible by ear from the running app**, so "accent audibly punches
-      harder" (this build step's design-doc target) is proven in the self-
-      test's numeric sense (an accented note's amp/cutoff terms measurably
-      differ from a normal one once a depth is turned up) but not yet
-      confirmable by a human at the speakers. Builds clean (Debug + Release,
-      zero warnings); verified same session via `cdb.exe` — no assertion
-      fired from `runAccentDepthSelfTest` or anything else, only the
-      unrelated font bug below.
-      **Step 4 (hand-over / transitions) done:** `renderVoiceBlock`
-      (`Source/Arpeggiator.h/.cpp`) extended from the two-way `arpWasOn bool`
-      to a real three-way arbitration — a new `VoiceOwner { Keys, Arp, Seq }`
-      enum, computed each block from `arpEnabled`/`seqEnabled` (seq wins an
-      arbitrary, documented tie-break if a bug ever left both on at once; the
-      real toggle UI, step 6, is never meant to produce that state). On any
-      change of owner, `router.releaseVoice`/`arp.releaseVoice`/
-      `seq.releaseVoice` are now *all three* called unconditionally — each
-      already idempotent, so exactly one ever does anything, same invariant
-      that already made a stuck note unreachable in the two-way case.
-      `StepSequencer::releaseVoice` is new (`Source/StepSequencer.h/.cpp`),
-      mirroring `Arpeggiator::releaseVoice`'s shape: force-close an open gate,
-      park the clock on a boundary. Deliberately **no** `StepSequencer::retakeVoice`
-      despite the design doc naming one — `Arpeggiator` never needed one
-      either, for the same reason: a parked clock already fires its first
-      step at once on the very next `process()` call, so only `NoteRouter`
-      (which isn't self-clocking) needs an explicit "sound it again now."
-      `MainComponent` gained a `StepSequencer sequencer` member and swapped
-      `arpWasOn` for `voiceOwner`; `prepareToPlay`/`releaseResources` now
-      prepare/reset the sequencer alongside the arp (S8/S9). Walked the design
-      doc's S1-S12: S1-S4 needed and got a new self-test
-      (`runSeqTransitionSelfTest`, `Source/StepSequencer.h/.cpp`) since they
-      exercise the new arbitration code directly; S6/S7 need no new code
-      (`process()` already reads pattern data fresh at every step boundary,
-      so a mid-run length change or a live edit was already correct with zero
-      changes here); S10 stays documented-not-coded; S11/S12 are already
-      covered by existing self-tests or are simply never reached (Hold is
-      never read while the seq drives). `runSeqTransitionSelfTest` drives
-      real blocks through the real `renderVoiceBlock` — voice, router, arp
-      and seq all real, nothing re-implemented — same "output is the only
-      thing that proves it" approach as `runArpTransitionSelfTest`, which was
-      itself extended (three-way `TransitionRig`) to keep exercising the
-      arp↔keys seam through the new signature. Builds clean (Debug + Release,
-      zero warnings); verified via `cdb.exe` — no assertion fired from either
-      transition self-test or anything else, only the unrelated font bug
-      below. **First build step where the sequencer is reachable from the
-      real app** — flipping `seqEnabled` now actually plays the pattern
-      through `MainComponent::getNextAudioBlock`, though there is still no UI
-      toggle for it (step 6) or filter-lane DSP (step 5), so this remains
-      confirmable only by hand-editing the atomic or through the self-test,
-      not yet by ear from the panel.
-      **Step 5 (filter automation lanes) done:** resolved section 5's open
-      question — resonance gets a **simple additive 0..1 offset, clamped
-      post-sum** rather than cutoff's octave-style shape, chosen because it
-      keeps 0 exactly inert without redefining `stepResonanceNorm`'s own
-      zero default, needs no new depth knob, and matches stability
-      requirements (`Vcf::processSample`'s feedback solution assumes
-      resonance in `[0,1]`). Cutoff's lane reuses the existing
-      `cutoffModulationOctaves` sum as a fourth additive term, scaled by a
-      new **fixed** constant (`SynthVoice::seqCutoffModRangeOctaves = 4.0f`,
-      not a user knob) so 0 stays exactly 0 octaves — a one-directional
-      lift, not centred on a midpoint, so an unedited lane never shifts the
-      sound. **New transport mechanism**, not a `VoiceParameters` atomic:
-      `SynthVoice::setStepFilterModulation(cutoffNorm, resonanceNorm)`,
-      called by `StepSequencer::process()` at every step boundary
-      (independent of gate state) exactly where step 2 left a
-      read-and-discard. Deliberately bypasses the atomic-polling
-      `apply()`/`lastXxx` pattern every other smoothed parameter uses —
-      pushes straight into each value's own smoother's `setTargetValue`,
-      since the caller already knows exactly *when* a value changes (a step
-      boundary), unlike a UI knob's atomic that gets polled every block
-      regardless. Follows the `currentVelocity` precedent (audio-thread
-      working state passed as a method argument, not a UI-settable
-      parameter) rather than adding new `VoiceParameters` fields that only
-      the audio thread would ever write. Both lanes smoothed at their own
-      point of use (`SynthVoice::rampSeconds` for cutoff,
-      `resonanceRampSeconds` for resonance — the slower one, since a
-      resonance jump thumps the feedback loop the same way a knob jump
-      does), never a raw snap, satisfying CLAUDE.md's zipper-noise
-      constraint at 16th-note rates. `SynthVoice::reset()` now also zeroes
-      both smoothers, mirroring `currentVelocity`'s own reset, so a device
-      stop can't leave a stale filter-lane modulation hanging (S8).
-      `runFilterAutomationSelfTest` (`Source/DSP/SynthVoice.h/.cpp`) proves
-      the summing formulas in isolation — untouched vs. explicit (0,0) is
-      byte-identical (exact: `0 * range` and `+ 0.0f` are both exact in
-      IEEE754), each lane turned up individually is provably *not*
-      byte-identical against the (0,0) baseline. `runStepSequencerRenderSelfTest`'s
-      existing cutoff/resonance-lane block — byte-identical when written at
-      step 2, with its own comment predicting step 5 would flip it — is now
-      flipped to the opposite assertion, exactly as predicted, proving the
-      *integration* (that `process()` actually calls the setter with real
-      per-step values, not just that the formula is correct alone). Builds
-      clean (Debug + Release, zero warnings); verified via `cdb.exe` — no
-      assertion fired from either self-test or anything else, only the
-      unrelated font bug below. **Not yet audible by ear from the running
-      app**, same caveat as step 3 and for the same reason: no UI knob or
-      pattern editor exists yet (step 6), so the only way to see either lane
-      move today is through the self-tests or by hand-editing
-      `stepCutoffNorm`/`stepResonanceNorm`. **Not yet tuned by ear either**:
-      `seqCutoffModRangeOctaves = 4.0f` is a placed-not-measured starting
-      guess (CLAUDE.md's "what you cannot verify") — easy to retune once
-      step 6 gives it a knob to feel through.
-      **Step 6 (UI wiring) done:** replaces `SynthPanel::SeqReservedStrip`
-      with a real SEQUENCER control cluster (`PanelSection`, matching every
-      other section's style) plus a new hand-painted 16-cell pattern grid —
-      the pattern (pitch/gate/accent/slide/cutoff/resonance) is now editable
-      and playable from the UI, closing this build step's design-doc target.
-      **`designHeight` grew 660 → 840** (`Source/UI/SynthPanel.h`) — flagged,
-      not silent: this was pre-authorized by this document's section 9
-      ("expect a window resize... not a Polish-step afterthought"), but it
-      also pushes the panel's aspect ratio further from the Pixel's 2.22:1
-      landscape shape than section 3's own letterboxing discussion already
-      worried about, which bears on CLAUDE.md's open "real cost of the
-      Windows → Android port" question in degree, not in kind.
-      **New index-based attach helpers** (`Source/UI/ParameterControls.h`):
-      `loadStepValue`/`storeStepValue`/`loadStepFlag`/`toggleStepFlag`, the
-      per-step-array equivalent of `attachKnob`/`attachChoice`/`attachToggle`
-      — a member-pointer-to-array plus an index, since `StepCell` is a
-      hand-painted component multiplexing several gestures onto one mouse
-      listener rather than a single widget with one `onChange`.
-      **`StepCell`/`StepGrid`** (`Source/UI/SynthPanel.h/.cpp`), following
-      `PianoKey`'s hand-painted precedent. Gestures (this build step's own
-      choice — section 9 left the exact gesture open, "informed by how it
-      actually feels to use"; easy to revise): plain click toggles Gate,
-      right-click toggles Accent, shift+click toggles Slide — all three
-      lane-independent — and a vertical drag adjusts whichever lane is
-      currently selected (quantised semitones for Pitch, a proportional
-      0..1 change for Cutoff/Resonance), with a fill-bar overlay for the
-      continuous lanes and a note-name readout for Pitch. Beat-grouped
-      shading (alternating every 4 steps) and a live playhead outline
-      (`PanelLookAndFeel::accentAlt`) round it out. **New audio→UI channel**:
-      `VoiceParameters::currentStepForUi` — the one atomic in that struct
-      written by the audio thread (`StepSequencer::process`, cleared by
-      `releaseVoice`) and read by the UI thread (`StepGrid`'s 30Hz `Timer`),
-      the reverse direction of every other field there.
-      **Pattern Length needed hand-wiring, not `ChoiceSpec`**: caught before
-      it shipped — `attachChoice`'s generic contract stores the selected
-      item's zero-based index verbatim, which is correct for every existing
-      combo box because its target is an enum whose value already IS that
-      index, but `seqPatternLength` is a plain 1..16 count, off by exactly
-      one from its choice index. Wired by hand instead, storing
-      `getSelectedId()` itself (item IDs set to 1..16 directly) — documented
-      in `SynthPanel.h` so the next array-backed count doesn't repeat it.
-      Division reuses the arp's own `StepDivision` table safely, since that
-      one genuinely is an enum. The Lane selector (Pitch/Cutoff/Resonance)
-      is UI-only, no `VoiceParameters` target at all, also hand-wired.
-      Builds clean (Debug + Release, zero warnings); `cdb.exe` shows no new
-      assertion. **Verified visually, not just built**: launched the real
-      exe and screenshotted it twice from a script-driven, zero-interaction
-      cold start — correct layout (nothing clipped or overlapping down to
-      the piano row) and correct defaults for every new control (On off,
-      Division 1/16, Pattern Length 16, Tempo 120, Gate 0.50, Lane Pitch,
-      all 16 cells empty). **NOT verified**: the actual mouse gestures
-      (click/drag/right-click/shift-click) — synthetic input in this
-      environment proved unreliable (a multi-monitor DPI/coordinate mismatch
-      between window capture and injected clicks meant one synthetic click
-      landed on an unrelated window on the user's desktop, a harmless
-      cursor-placement click but a real miss) and was abandoned rather than
-      risking further interference with the user's other windows. **The
-      user needs to click around by hand** before trusting the gesture set
-      described above; a wrong or unresponsive gesture would currently fail
-      silently, the same class of gap CLAUDE.md's "what you cannot verify"
-      exists for. Build steps 7-8 not started.
+      resonance), shared clock/trigger plumbing with the arp. Design + full
+      build-step rationale: [step-sequencer-design.md](step-sequencer-design.md)
+      — that doc, not this entry, is where the "why" for each decision below
+      now lives.
+      All 8 build steps done. `StepSequencer` (`Source/StepSequencer.h/.cpp`)
+      owns its own `StepClock` and six per-step `VoiceParameters` arrays
+      (pitch/gate/accent/slide + both filter lanes) plus six scalar atomics
+      (`seqEnabled`, `seqDivision`, `seqPatternLength`, `seqTempoBpm`,
+      `seqGateLength`, `seqRecordArmed`). `process()` copies the arp's
+      two-deadline sub-block loop shape rather than sharing it (design doc
+      section 2). Accent is realized as velocity into new amp/cutoff depth
+      knobs in `SynthVoice`; slide reuses the arp's Tie idea (skip the
+      force-close so `SynthVoice` takes its legato branch); the filter lanes
+      sum into `SynthVoice`'s existing cutoff modulation point and a new
+      resonance one (simple additive 0..1 offset, clamped — section 5).
+      Hand-over is a real three-way `VoiceOwner { Keys, Arp, Seq }`
+      arbitration in `renderVoiceBlock` (`Arpeggiator.h/.cpp`), all three
+      `releaseVoice`s called unconditionally on any change, walked against
+      the design doc's S1-S12 transitions table. Live pitch entry
+      (`seqRecordArmed`) captures the router's priority-resolved live pick
+      into `stepPitchLog2Hz`/`stepGateOn` at each step boundary while armed,
+      wrapping rather than auto-stopping (section 8). UI: `SynthPanel`'s
+      SEQUENCER section (`designHeight` grew 660 → 840, pre-authorized by
+      section 9) replaces the old reserved strip with On+Record, Division,
+      Pattern Length, Tempo, Gate, Lane controls and a hand-painted 16-cell
+      `StepCell`/`StepGrid` (click=Gate, right-click=Accent,
+      shift+click=Slide, vertical drag=selected continuous lane), following
+      `PianoKey`'s hand-painted precedent plus new index-based attach helpers
+      in `ParameterControls.h`.
+      Six self-tests (`runStepSequencerPatternSelfTest`,
+      `runStepSequencerRenderSelfTest`, `runAccentDepthSelfTest`,
+      `runSeqTransitionSelfTest`, `runFilterAutomationSelfTest`,
+      `runStepRecordSelfTest`) drive real audio through the real classes
+      rather than re-implementing what they check. Builds clean (Debug +
+      Release, zero warnings) throughout every build step; verified via
+      `cdb.exe` — no assertion fired from any step-sequencer or arp/note-
+      router self-test, only the unrelated font bug below. Visually verified
+      from a real cold-start launch: correct layout and correct control
+      defaults.
+      **Not verified by a human**: the grid's mouse gestures
+      (click/drag/right-click/shift-click) and live-record — synthetic input
+      in this environment proved unreliable for testing them, so both need
+      clicking/playing by hand before being trusted; MIDI-hardware
+      end-to-end remains untested (no device available this session);
+      whether any of it sounds like an acid line is an ears judgement
+      nobody has made yet (design doc section 12's "Taste" list).
       **Future consideration, not yet scoped into this item**: *generalised*
       per-step parameter automation ("p-locks") for arbitrary parameters
       beyond pitch/gate/accent/slide/cutoff/resonance — full design in
       [step-automation.md](step-automation.md). That doc flags itself as
       plausibly a bigger build than the synth voice, so treat it as
-      something to look at once item 7 is built, not a commitment yet
+      something to look at now that item 7 is built, not a commitment yet
 - [ ] **8. Character & "Vim"** — analogue realism + performance-feel layer on
       top of the clean core voice: filter feedback saturation, exponential
       envelope curves, oscillator drift, output noise floor/saturation,
@@ -500,6 +318,30 @@ Build/validate everything here before touching Android.
       doesn't block or depend on any numbered item above. Also: link
       `juce_data_structures` explicitly in `CMakeLists.txt` (currently only
       pulled in transitively via `juce_gui_extra`)
+- [ ] **Step sequencer's default pitch is a real but inaudible frequency,
+      not "off"** — `VoiceParameters::stepPitchLog2Hz` (`Source/DSP/VoiceParameters.h`)
+      is a zero-initialized `std::array`, the same convention every other
+      per-step field uses (gate, accent, slide, the cutoff/resonance lanes),
+      where `0` correctly means "no effect". Pitch is stored as `log2(Hz)`
+      though, not a depth or a flag, so its zero-init isn't neutral - it's a
+      real value, `2^0 = 1 Hz`, roughly five octaves below anything reachable
+      via the keyboard (`QwertyNoteInput::minOctaveShift = -2` floors out at
+      MIDI 24, ≈33 Hz). Found 2026-08-28 via a user bug report ("sequencer
+      just clicks, keyboard plays a nice clear note") that took most of a
+      session to trace: a step whose gate is switched on by a plain click in
+      the grid (`SynthPanel.cpp`'s `StepCell::mouseUp`, which only ever
+      touches `stepGateOn`) but whose pitch is never separately dragged plays
+      that inaudible 1 Hz "note" - heard as a click-train
+      (`documents/step-sequencer-design.md` section 8 territory), not a
+      bug in the render loop itself, which was directly verified correct via
+      a real repro through `renderVoiceBlock`. Invisible on a fresh pattern
+      because every step's gate also defaults off, so nothing plays the
+      nonsense pitch underneath until a step gets gated without ever being
+      pitched. Candidate fixes, not decided: seed `stepPitchLog2Hz` to a
+      sane note (e.g. middle C) instead of `0`; or have the plain-click
+      gate-on gesture snap pitch up to a default if it's still at the raw
+      zero. Out of scope for whichever numbered item is active when this is
+      picked up
 
 ## 2. Stage B — Android (port)
 

@@ -630,10 +630,14 @@ void renderVoiceBlock (SynthVoice& voice, NoteRouter& router, Arpeggiator& arp, 
             break;
 
         case VoiceOwner::Seq:
-            // The sequencer has no keyboard input of its own - it reads its
-            // pattern straight out of VoiceParameters by index, so it takes
-            // no HeldNotes span, unlike the arp.
-            seq.process (voice, output, numSamples);
+            // The sequencer has no keyboard input of its own for PLAYBACK -
+            // it reads its pattern straight out of VoiceParameters by index,
+            // so it takes no HeldNotes span, unlike the arp. It DOES take the
+            // router's current priority-resolved pick for RECORDING (build
+            // step 7, documents/step-sequencer-design.md section 8) - sampled
+            // once per block here, same as liveNotes just above, and ignored
+            // internally unless seqRecordArmed is on.
+            seq.process (voice, router.getNoteStack().getCurrentResolution (priorityMode), output, numSamples);
             break;
 
         case VoiceOwner::Keys:

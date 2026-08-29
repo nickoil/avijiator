@@ -82,7 +82,9 @@ private:
     // Arp On/Hold share one cell (documents/ui-design.md section 2) - two
     // ToggleButtons stacked, each drawing its own caption via
     // PanelLookAndFeel::drawToggleButton, so the cell needs no separate
-    // label the way a KnobCell/ChoiceCell does.
+    // label the way a KnobCell/ChoiceCell does. Reused as-is by SEQUENCER's
+    // own On/Record pair (item 7 build step 7) - same shape, a second
+    // independent-ish on/off switch sharing conceptual space with the first.
     struct ToggleStack final : public juce::Component
     {
         juce::ToggleButton top, bottom;
@@ -254,7 +256,15 @@ private:
     //     Wiring it by hand stores getSelectedId() itself instead.
     static constexpr int numSeqKnobs = 2;    // Tempo, Gate
     static constexpr int numSeqChoices = 1;  // Division only - see above
-    static constexpr int numSeqToggles = 1;  // On (Hold has no seq equivalent)
+    static constexpr int numSeqToggles = 2;  // On, Record (item 7 build step 7) -
+                                              // stacked into ONE cell via
+                                              // ToggleStack, same as the arp's
+                                              // On+Hold, so - like numArpToggles -
+                                              // this constant sizes seqToggleSpecs
+                                              // only, and is deliberately NOT what
+                                              // the resized() cell-width formula
+                                              // uses for this pair; see that
+                                              // formula's own comment.
 
     // The load-bearing counts from section 2: "19 knobs, 6 combo boxes, 2
     // toggles = 27" must still hold after being spread across seven arrays
@@ -425,14 +435,17 @@ private:
     std::array<KnobCell, numOutputKnobs> outputKnobs;
 
     // Item 7 build step 6, replacing the item-7 reserved placeholder that
-    // used to be here. Cell order is On, Division, Pattern Length, Tempo,
-    // Gate, Lane - matching documents/step-sequencer-design.md section 9's
-    // "On/Division/Tempo/Gate/PatternLength" list with Pattern Length moved
-    // next to Division (both structural/discrete) and Lane - this build
-    // step's own addition, the grid's edit-mode selector - appended last.
+    // used to be here. Cell order is On+Record, Division, Pattern Length,
+    // Tempo, Gate, Lane - matching documents/step-sequencer-design.md
+    // section 9's "On/Division/Tempo/Gate/PatternLength" list with Pattern
+    // Length moved next to Division (both structural/discrete) and Lane -
+    // build step 6's own addition, the grid's edit-mode selector - appended
+    // last. Build step 7 turns the bare On toggle into an On+Record
+    // ToggleStack, mirroring arpToggleStack exactly, rather than adding a
+    // whole new cell - see numSeqToggles' own comment above.
     PanelSection seqControlSection { "SEQUENCER" };
-    juce::ToggleButton seqOnToggle;
-    juce::Label seqOnCaption; // blank - see arpToggleCaption's identical precedent above
+    ToggleStack seqToggleStack;
+    juce::Label seqToggleCaption; // blank - see arpToggleCaption's identical precedent above
     std::array<ChoiceCell, numSeqChoices> seqChoices; // Division only
     std::array<KnobCell, numSeqKnobs> seqKnobs;       // Tempo, Gate
 

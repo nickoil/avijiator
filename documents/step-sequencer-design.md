@@ -159,13 +159,15 @@ against `SynthVoice.cpp`, not assumed:
   smoothed shape. The step sequencer becomes the first-ever consumer of
   resonance modulation in this instrument.
 
-  **Open question, not settled here**: cutoff's summing point works in
-  octaves because cutoff is a frequency; resonance is already a normalised
-  0..1 quantity, so an octave-style sum doesn't obviously apply. Candidates:
-  a simple additive 0..1 offset (clamped post-sum), or treat it identically
-  to cutoff for consistency even though the physical justification differs.
-  Decide when build-order row 5 (section 11) is actually underway, informed
-  by how the filter responds in practice — not a desk decision.
+  **Settled, build order row 5**: a **simple additive 0..1 offset, clamped
+  post-sum**, not cutoff's octave-style shape. Chosen because it keeps 0
+  exactly inert without redefining `stepResonanceNorm`'s own zero default,
+  needs no new depth knob, and matches `Vcf::processSample`'s feedback
+  solution, which assumes resonance stays in `[0,1]` — an octave-style sum
+  would need its own clamp back into range anyway, so the simpler shape wins
+  outright rather than by a coin flip. Not yet tuned by ear (CLAUDE.md's
+  "what you cannot verify") — a placed-not-measured starting point, easy to
+  retune now that row 6 gives it a knob to feel through.
 
 Both values are pushed through smoothing before reaching the DSP, never a
 raw atomic snap — CLAUDE.md's "smooth cutoff/resonance... changes, or you
@@ -244,25 +246,61 @@ reads it, not necessarily precisely at the step boundary.
 
 ## 8. Pitch entry — live step-record
 
-Record-arm toggle; while armed, incoming `NoteEvent`s from the same
-`NoteEventFifo`/`NoteRouter` path already feeding MIDI/QWERTY/on-screen input
-are captured in sequence into `stepPitchLog2Hz`/`stepGateOn` as the clock
-advances. Still to settle when build-order row 7 (section 11) is underway:
-behaviour on a step with no key pressed (current plan: leave `gateOn =
-false`), gate-length/tie behaviour while recording, and whether recording
-auto-stops at 16 steps or wraps. Filter lanes are not touched by step-record
-— they're edited directly (section 9), not captured from played input.
+**Built, build order row 7.** Record-arm toggle (`VoiceParameters::seqRecordArmed`,
+a UI `ToggleStack` cell next to Seq On — `SynthPanel.cpp`); while armed **and**
+the sequencer owns the voice, `StepSequencer::process` reads the router's
+current priority-resolved pick — `NoteStack::getCurrentResolution`, the same
+rule Keys itself sounds by, sampled once per block exactly like the arp's own
+`liveNotes` — and writes it into that step's `stepPitchLog2Hz`/`stepGateOn`
+immediately before reading them back for playback, so a freshly recorded step
+sounds its own new value at once rather than one lap late. This deliberately
+reuses `NoteRouter`'s existing block-granular live-tracking (the same
+`TrackOnly` dispatch that already lets the arp read a live held set while it
+owns the voice) rather than adding a new capture path — no NoteEventFifo
+changes needed.
+
+The three points this section left open are now settled, each easy to revise:
+
+- **No key pressed at a boundary**: records a rest (`gateOn = false`),
+  overwriting whatever the step held before — the plan this section already
+  named.
+- **Gate-length/tie behaviour while recording**: **not inferred.** A note held
+  across several step boundaries records as a fresh gated (retriggering) step
+  at each one, because recording only ever writes `stepPitchLog2Hz`/`stepGateOn`
+  — `stepSlide`/`stepAccent` are untouched, so a tie across recorded steps is
+  still a hand-edit in the grid afterward, exactly like accent already is.
+  Simpler than inferring a tie from held-duration, and consistent with
+  "filter lanes aren't touched by step-record" already deciding the same way
+  for a different pair of fields.
+- **Auto-stop vs. wrap**: **wraps.** Nothing clears `seqRecordArmed`
+  automatically, so recording re-captures over the pattern for as long as it
+  stays armed, standard loop-record convention for this genre of instrument.
+  The alternative (stop after one pass) would need new state — an armed-since
+  step index and an audio-thread write-back to disarm — for a less
+  discoverable result (record silently turning itself off); wrap needs none
+  of that.
+
+Filter lanes are not touched by step-record — they're edited directly
+(section 9), not captured from played input. `runStepRecordSelfTest`
+(`StepSequencer.h`/`.cpp`) covers: disarmed recording is a no-op even with a
+sounding resolution in hand (byte-identical pattern storage); armed recording
+overwrites the current step's pitch and gate; armed recording with nothing
+held writes a rest over a previously-gated step; accent/slide survive being
+recorded over; and recording keeps re-capturing after a full (short, for a
+fast test) pattern wraps, with the armed flag still on afterward.
 
 ---
 
 ## 9. UI
 
-Replace `SynthPanel::SeqReservedStrip` (`SynthPanel.h:100-105`,
-`SynthPanel.cpp:205-216,668`, `seqStripHeight = 90` at `SynthPanel.cpp:587`).
-Flag plainly: 90px is very unlikely to be enough for a 16-cell grid *and*
-On/Division/Tempo/Gate/PatternLength/Record controls *and* two filter
-lanes — expect a window resize, same as item 5's growth to 660px, not a
-Polish-step afterthought.
+**Built, build order row 6** (Record's own toggle cell followed in row 7,
+section 8). Replaced `SynthPanel::SeqReservedStrip` (was
+`SynthPanel.h:100-105`, `SynthPanel.cpp:205-216,668`, `seqStripHeight = 90` at
+`SynthPanel.cpp:587`) with a real `PanelSection`. The flagged resize
+happened: `designHeight` grew 660 → 840 (`SynthPanel.h`) — pre-authorized
+here, not a Polish-step afterthought, though it pushes the panel's aspect
+ratio further from the Pixel's landscape shape than section 3 already
+worried about.
 
 New `StepCell` component (following `SynthPanel::PianoKey`'s precedent of a
 hand-written `paint()`, `SynthPanel.cpp:219+`) for the visual states a step
@@ -276,12 +314,25 @@ the natural fit, matching the "overlay the real value" spirit of
 Two independent continuous lanes (cutoff, resonance) on the same 16 cells is
 more than one — showing both at once per cell is likely to be cramped or
 ambiguous, so v1 needs a lane-select (which value a drag on a step currently
-edits), not a plan to render both simultaneously. Reuse
+edits), not a plan to render both simultaneously. Reuses
 `PanelLookAndFeel::accentAlt` (`PanelLookAndFeel.h:35`, already earmarked for
-"active state" colouring) for the currently-playing step highlight. Exact
-gesture (vertical drag most likely) and lane-switch affordance to be settled
-when build-order row 6 is underway, informed by how it actually feels to use
-— not decided from a desk.
+"active state" colouring) for the currently-playing step highlight,
+driven by `VoiceParameters::currentStepForUi`.
+
+**Gesture, settled at build time** (`StepCell::mouseDown/mouseDrag/mouseUp`,
+`SynthPanel.cpp`): plain click toggles Gate, right-click toggles Accent,
+shift+click toggles Slide — all three lane-independent, so they work no
+matter which lane is selected — and a vertical drag past a small pixel
+threshold adjusts whichever lane the hand-wired Lane combo box (Pitch /
+Cutoff / Resonance, UI-only, no `VoiceParameters` target of its own) currently
+has selected: quantised semitones for Pitch, a proportional 0..1 change for
+Cutoff/Resonance. A drag and a click are mutually exclusive per press
+(`isDraggedFar` gates `mouseUp`'s click handling), not two gestures that could
+both fire. **Not yet verified by hand** — synthetic input proved unreliable
+for testing this in-session (documents/TODO.md's build step 6 entry has the
+full reason) — so this gesture set is confirmed *implemented*, not yet
+confirmed to *feel right*; the design was always "informed by how it actually
+feels to use," and that check is still outstanding.
 
 ---
 

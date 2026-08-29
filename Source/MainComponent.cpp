@@ -136,6 +136,13 @@ MainComponent::MainComponent()
     // independent of the sequencer, so this exercises SynthVoice directly,
     // same split as build step 3's runAccentDepthSelfTest above.
     runFilterAutomationSelfTest();
+
+    // Item 7, build step 7 (pitch entry): StepSequencer::process's new
+    // liveResolution parameter and the record-arm capture it gates - see
+    // documents/step-sequencer-design.md section 8. Step 6 added no new
+    // audio self-test (pure UI), so this is the next one after step 5's
+    // above.
+    runStepRecordSelfTest();
    #endif
 
     qwertyInput.onNoteEvent = [this] (const NoteEvent& event)
