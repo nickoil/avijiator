@@ -867,6 +867,17 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
     };
     addAndMakeVisible (audioSettingsButton);
 
+    // Item 8 (documents/TODO.md) - header row, left of Audio Settings.
+    // Amber text, matching the amber knob pointer this button drives -
+    // TextButton::textColourOffId, not Label::textColourId (this is a
+    // TextButton, which never consults a Label's ColourId).
+    autovijiButton.setButtonText ("AUTOVIJI");
+    autovijiButton.setColour (juce::TextButton::textColourOffId, PanelLookAndFeel::accentAlt);
+    autovijiButton.setColour (juce::TextButton::textColourOnId, PanelLookAndFeel::accentAlt);
+    autovijiButton.setWantsKeyboardFocus (false);
+    autovijiButton.onClick = [this] { randomizeSequence(); };
+    addAndMakeVisible (autovijiButton);
+
     // The fixed design size, per section 3 - NOT the real window size. Step
     // 6's scale transform maps this onto whatever the actual window is.
     setSize (designWidth, designHeight);
@@ -886,6 +897,60 @@ SynthPanel::~SynthPanel()
     // Must happen before `lookAndFeel` is destroyed, or JUCE asserts on
     // shutdown - documents/ui-design.md section 7.
     setLookAndFeel (nullptr);
+}
+
+//==============================================================================
+// Item 8 (documents/TODO.md, documents/autoviji-design.md): fills all 16
+// steps with a random note from two fixed octaves, rolls each step's gate
+// (1-in-8 chance of coming up off) and per-step Cutoff lane, then turns the
+// sequencer on. Runs entirely on the message thread (this is a button click
+// handler) using the same plain-atomic storeStepValue helper
+// StepCell::mouseDrag/mouseUp already use for these exact fields
+// (ParameterControls.h) - no new threading pattern.
+void SynthPanel::randomizeSequence()
+{
+    // Two fixed octaves, C2..B2 and C3..B3 (MIDI 36-59) - anchored on the
+    // step grid's own existing default pitch
+    // (VoiceParameters::defaultStepMidiNote), so a fresh random pattern
+    // never lands in a surprising register.
+    constexpr int randomOctaveBaseMidiNote = 36;
+
+    auto& rng = juce::Random::getSystemRandom();
+
+    for (int i = 0; i < seqMaxSteps; ++i)
+    {
+        const auto midiNote = randomOctaveBaseMidiNote + rng.nextInt (24);
+        storeStepValue (&VoiceParameters::stepPitchLog2Hz, i, pitchLog2HzForMidiNote (midiNote), params);
+
+        // 1-in-8 chance the step comes up off (silent); pitch above is
+        // still written even for an off step - matches the grid's own
+        // existing convention of gate and pitch being independent fields.
+        const auto gateOn = rng.nextInt (8) != 0;
+        storeStepValue (&VoiceParameters::stepGateOn, i, gateOn ? 1 : 0, params);
+
+        storeStepValue (&VoiceParameters::stepCutoffNorm, i, rng.nextFloat(), params);
+    }
+
+    // Autoviji's own default groove: 1/8T, 8 steps - shorter and swung
+    // against the plain 1/16 default, so a random pattern doesn't just sound
+    // like the same straight grid with different notes. Same two-step shape
+    // as the toggle sync below: store the atomic directly, then sync the
+    // widget's own displayed state to match (attachChoice's onChange is
+    // built to store FROM the widget, not the other way round).
+    params.seqDivision.store ((int) StepDivision::EighthTriplet, std::memory_order_relaxed);
+    seqChoices[0].comboBox.setSelectedId ((int) StepDivision::EighthTriplet + 1, juce::dontSendNotification);
+
+    constexpr int autovijiPatternLength = 8;
+    params.seqPatternLength.store (autovijiPatternLength, std::memory_order_relaxed);
+    seqPatternLengthCombo.setSelectedId (autovijiPatternLength, juce::dontSendNotification);
+
+    // Turn the sequencer on. Writing the atomic directly rather than going
+    // through attachToggle's onClick (that lambda is what actually owns this
+    // store) and then syncing the ToggleButton's own visual state to match -
+    // same two-step shape attachToggle's own seed call uses, just from here
+    // instead of the constructor.
+    params.seqEnabled.store (1, std::memory_order_relaxed);
+    seqToggleStack.top.setToggleState (true, juce::dontSendNotification);
 }
 
 //==============================================================================
@@ -909,6 +974,8 @@ void SynthPanel::resized()
     constexpr int headerHeight = 36;
     constexpr int audioSettingsWidth = 130;
     constexpr int audioSettingsHeight = 28;
+    constexpr int autovijiWidth = 90; // item 8 - narrower than Audio Settings, "Autoviji" is shorter
+    constexpr int autovijiGap = 12;   // same as the section-to-section `gap` below
     // Item 7 build step 6: the pattern grid's own row height, chosen (not
     // derived from PanelSection's cell geometry - StepGrid has no caption
     // strip) to give a vertical-drag gesture a comfortable range, roughly
@@ -930,6 +997,11 @@ void SynthPanel::resized()
 
         audioSettingsButton.setBounds (headerRow.removeFromRight (audioSettingsWidth)
                                                  .withSizeKeepingCentre (audioSettingsWidth, audioSettingsHeight));
+
+        // Item 8 - immediately to Audio Settings' left, same row.
+        headerRow.removeFromRight (autovijiGap);
+        autovijiButton.setBounds (headerRow.removeFromRight (autovijiWidth)
+                                            .withSizeKeepingCentre (autovijiWidth, audioSettingsHeight));
 
         // Measured, not guessed - +2px is anti-aliasing slack, not a
         // workaround (measuredTextWidth's numGlyphs fix above resolved the

@@ -71,6 +71,14 @@ public:
 
 private:
     //==========================================================================
+    // Autoviji's "surprise me" handler - fills the pattern with a random
+    // note per step (two fixed octaves), rolls each step's gate (1-in-8
+    // off) and per-step Cutoff lane, then turns the sequencer on. Wired to
+    // autovijiButton.onClick in the constructor. See documents/TODO.md
+    // item 8 and documents/autoviji-design.md.
+    void randomizeSequence();
+
+    //==========================================================================
     // One knob/choice cell each - the same shape as the throwaway
     // scaffolding's DebugControl/DebugChoice (MainComponent.h), generalised
     // across all seven sections instead of one flat table.
@@ -469,6 +477,13 @@ private:
     int octaveShift = 0;
 
     juce::TextButton audioSettingsButton;
+
+    // Item 8 (documents/TODO.md) - header row, left of Audio Settings, not
+    // a SEQUENCER cell (that section's width stays exactly what item 7 left
+    // it at). Plain action button, same onClick-only shape as
+    // audioSettingsButton - no persistent toggle state, just an onClick that
+    // calls randomizeSequence().
+    juce::TextButton autovijiButton;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPanel)
 };

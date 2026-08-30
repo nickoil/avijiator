@@ -179,7 +179,35 @@ Build/validate everything here before touching Android.
       [step-automation.md](step-automation.md). That doc flags itself as
       plausibly a bigger build than the synth voice, so treat it as
       something to look at now that item 7 is built, not a commitment yet
-- [ ] **8. Settings Persistence** — Design + build order:
+- [x] **8. Autoviji — random sequence fill** — one-press "surprise me" button
+      in the header row, left of Audio Settings. Design record, written after
+      the fact rather than before (session discipline note - should have been
+      step 0): [autoviji-design.md](autoviji-design.md).
+      Fills all 16 steps with a random note across two fixed octaves (C2..B3,
+      MIDI 36-59), independently rolls each step's gate with a 1-in-8 chance
+      of coming up off, and randomizes each step's per-step Cutoff lane
+      (`stepCutoffNorm`, item 7's existing modulation lane - not the main VCF
+      Cutoff knob). Also sets Autoviji's own default groove (Division 1/8T,
+      Pattern Length 8) and turns the sequencer on, syncing all four affected
+      widgets (step grid, On toggle, Division combo, Pattern Length combo) to
+      match the atomics it just wrote. `SynthPanel::randomizeSequence()`
+      (`Source/UI/SynthPanel.cpp`), reusing the exact plain-atomic
+      `storeStepValue` helper `StepCell::mouseDrag`/`mouseUp` already use for
+      these fields (`ParameterControls.h`) - no new threading pattern, runs
+      entirely on the message thread as a button click handler. Button text
+      is amber (`PanelLookAndFeel::accentAlt`), matching the knob pointer
+      colour it shares a palette role with.
+      Verified via a real Debug build + launch: random notes land inside the
+      intended range, roughly 1-in-8 steps come up off, Division/Pattern
+      Length/On all update visibly, and unrelated knobs are untouched.
+      **One caveat from that verification**: several early test runs showed
+      unrelated knobs (Saw, Pulse, Cutoff, Resonance, LFO...) appearing to
+      change too - traced to leftover `Avijiator.exe` processes from earlier
+      in the session being captured instead of the real window, not a real
+      bug; resolved once every stray process was killed before testing. Not
+      re-verified against a MIDI hardware or on a full `cdb.exe` pass since
+      the octave-range/gate-odds edit.
+- [ ] **9. Settings Persistence** — Design + build order:
       [settings-persistence-design.md](settings-persistence-design.md).
       Save/reload all synth settings, including a preset system. nothing is persisted anywhere in this app today: `createStateXml`,
       `ApplicationProperties`, `PropertiesFile`, `ValueTree` all return zero
@@ -209,7 +237,7 @@ Build/validate everything here before touching Android.
       first, at the cost of that rename silently dropping old saved tempo
       values (accepted trade-off, not a migration bug — see the design
       doc's section 2).
-- [ ] **9. Character & "Vim"** — analogue realism + performance-feel layer on
+- [ ] **10. Character & "Vim"** — analogue realism + performance-feel layer on
       top of the clean core voice: filter feedback saturation, exponential
       envelope curves, oscillator drift, output noise floor/saturation,
       humanised arp/seq timing, chorus, per-note randomisation, mod

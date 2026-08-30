@@ -1,6 +1,6 @@
 # Settings persistence design — session-state auto-restore + named presets
 
-Design record for TODO item 8, "Settings Persistence"
+Design record for TODO item 9, "Settings Persistence"
 ([TODO.md](TODO.md) lines 182-206). Written before implementation, same
 discipline as [arpeggiator-design.md](arpeggiator-design.md) (item 5),
 [step-sequencer-design.md](step-sequencer-design.md) (item 7), and
@@ -369,7 +369,7 @@ discipline as every other self-test in this codebase
    folder on first launch.
 6. **Self-tests.** Section 10, both scenarios, verified clean via `cdb.exe`
    per this project's headless-verification convention.
-7. **Polish.** Tick TODO.md item 8; if tempo-sync hasn't landed yet, no
+7. **Polish.** Tick TODO.md item 9; if tempo-sync hasn't landed yet, no
    further action needed there (section 2's policy already covers that
    rename when it happens); if it has, confirm the rename's effect on old
    saves matches section 2's documented example.

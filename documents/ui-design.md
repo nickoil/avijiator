@@ -363,6 +363,6 @@ Deliberately not in item 6, so they do not creep in:
 - **Any DSP change.** See the note at the top.
 - **Touch input handling.** Stage B item 9. This item only makes touch-sized
   *decisions*; it does not add gesture code.
-- **The character/"Vim" controls** (item 8). Those parameters do not exist yet;
+- **The character/"Vim" controls** (item 10). Those parameters do not exist yet;
   when they do they will add sections, which this structure is designed to
   absorb.

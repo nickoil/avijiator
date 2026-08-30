@@ -354,5 +354,5 @@ sliders were built with, all by-ear starting points, not derived constants.
 
 Not in item 3: MIDI, real note-on/off (item 4), glide/legato (item 4), note
 priority (item 4), arpeggiator (item 5), accent (item 7), exponential envelope
-curves (item 8/`character-and-vim.md` A2), a second envelope (explicitly forbidden
+curves (item 10/`character-and-vim.md` A2), a second envelope (explicitly forbidden
 by CLAUDE.md).
