@@ -119,12 +119,17 @@ void PanelLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wi
     g.setColour (outline);
     g.drawEllipse (centre.x - knobRadius, centre.y - knobRadius, knobRadius * 2.0f, knobRadius * 2.0f, 1.0f);
 
-    // Pointer - single flat line from centre to the current angle.
+    // Pointer - single flat line from centre to the current angle. Deliberately
+    // NOT rotarySliderFillColourId (teal, shared with the fill arc above) - the
+    // pointer reads as a distinct "exact position" mark against the arc's
+    // "how far turned" fill, so it gets its own colour straight from the
+    // static palette, same as the section-4 comment's carve-out for anything
+    // that isn't one of the eight standard widgets.
     auto pointerLength = knobRadius * 0.75f;
     juce::Path pointer;
     pointer.startNewSubPath (centre);
     pointer.lineTo (centre.getPointOnCircumference (pointerLength, toAngle));
-    g.setColour (findColour (juce::Slider::rotarySliderFillColourId));
+    g.setColour (accentAlt);
     g.strokePath (pointer, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved,
                                                   juce::PathStrokeType::rounded));
 }

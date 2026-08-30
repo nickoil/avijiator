@@ -669,7 +669,7 @@ void SynthPanel::TitleMark::paint (juce::Graphics& g)
 {
     juce::AttributedString str;
     str.append ("AVIJI", markFont(), PanelLookAndFeel::text);
-    str.append ("A", markFont(), PanelLookAndFeel::accent);
+    str.append ("A", markFont(), PanelLookAndFeel::accentAlt);
     str.append ("TOR", markFont(), PanelLookAndFeel::text);
     str.setJustification (juce::Justification::centredLeft);
     str.draw (g, getLocalBounds().toFloat());

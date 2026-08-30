@@ -31,8 +31,8 @@ public:
     static const juce::Colour sectionFill;  // section backgrounds
     static const juce::Colour outline;      // section borders, combo box borders
     static const juce::Colour knobTrack;    // unfilled rotary/linear arc
-    static const juce::Colour accent;       // filled arc, knob pointer, toggle-on
-    static const juce::Colour accentAlt;    // ARP active state, latched note buttons
+    static const juce::Colour accent;       // filled arc, step-sequencer gate-on cells, toggle-on
+    static const juce::Colour accentAlt;    // knob pointer, ARP active state, latched note buttons
     static const juce::Colour text;         // control labels, values
     static const juce::Colour textDim;      // section headers, units, SEQ placeholder
     static const juce::Colour keyWhite;     // on-screen keyboard naturals

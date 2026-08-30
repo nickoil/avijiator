@@ -25,7 +25,9 @@ juce_add_gui_app(Avijiator
     COMPANY_NAME "Nick Casey"
     BUNDLE_ID "com.nickcasey.avijiator"
     NEEDS_WEB_BROWSER FALSE
-    NEEDS_CURL FALSE)
+    NEEDS_CURL FALSE
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Icon/avijiator-icon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Icon/avijiator-icon.png")
 
 # IBM Plex Sans, compiled in as binary data rather than relying on the
 # typeface being installed on whatever machine runs the .exe — matches the

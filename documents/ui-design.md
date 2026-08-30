@@ -174,8 +174,8 @@ section fill and border.
 | `sectionFill` | `#22272E` | section backgrounds |
 | `outline` | `#2E353F` | section borders, combo box borders |
 | `knobTrack` | `#333B45` | unfilled arc |
-| `accent` | `#4EC9C0` | filled arc, knob pointer, toggle-on |
-| `accentAlt` | `#E0A458` | ARP section active state, latched note buttons |
+| `accent` | `#4EC9C0` | filled arc, step-sequencer gate-on cells, toggle-on |
+| `accentAlt` | `#E0A458` | knob pointer, ARP section active state, latched note buttons |
 | `text` | `#E6EAF0` | control labels, values |
 | `textDim` | `#8A94A6` | section headers, units, the reserved SEQ placeholder |
 | `keyWhite` | `#C9D1DC` | on-screen keyboard naturals |
