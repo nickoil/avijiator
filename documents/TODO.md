@@ -179,7 +179,37 @@ Build/validate everything here before touching Android.
       [step-automation.md](step-automation.md). That doc flags itself as
       plausibly a bigger build than the synth voice, so treat it as
       something to look at now that item 7 is built, not a commitment yet
-- [ ] **8. Character & "Vim"** — analogue realism + performance-feel layer on
+- [ ] **8. Settings Persistence** — Design + build order:
+      [settings-persistence-design.md](settings-persistence-design.md).
+      Save/reload all synth settings, including a preset system. nothing is persisted anywhere in this app today: `createStateXml`,
+      `ApplicationProperties`, `PropertiesFile`, `ValueTree` all return zero
+      hits in `Source/`, and `juce_data_structures` isn't linked yet (same
+      gap already flagged in the device-settings item above — linking it
+      once serves both). Distinct from, and independent of, that
+      device-settings item (audio/MIDI device selection, much narrower) —
+      confirmed independent by ui-design.md's own "out of scope" note.
+      A preset needs to hold every `VoiceParameters` atomic plus **arp
+      performance state**: the latched Hold-mode chord (`Arpeggiator`'s
+      `latched`/`numLatched`/`latchAwaitingFreshChord`, see
+      arpeggiator-design.md section 8) — e.g. a preset that ships already
+      arpeggiating a C-major chord — not raw live key state, which is
+      transient and doesn't make sense to "restore".
+      A curated collection of good presets could ship permanently with the
+      app.
+      **Was open, now settled** (design doc written 2026-08-30; see its
+      intro for the full reasoning): (a) format is `juce::XmlElement`, not
+      `ValueTree` — matches the only existing serialization precedent in
+      this codebase (device-settings persistence), no second pattern
+      introduced; (b) shipped presets live in the user's settings folder,
+      written at first launch, not embedded `BinaryData` — editable without
+      a rebuild, revisit embedding only if this app is ever distributed;
+      (c) order-independent by construction — the serializer enumerates
+      parameters by name via `SynthPanel`'s spec-table member-pointers, so
+      it survives the tempo-sync rename regardless of which item lands
+      first, at the cost of that rename silently dropping old saved tempo
+      values (accepted trade-off, not a migration bug — see the design
+      doc's section 2).
+- [ ] **9. Character & "Vim"** — analogue realism + performance-feel layer on
       top of the clean core voice: filter feedback saturation, exponential
       envelope curves, oscillator drift, output noise floor/saturation,
       humanised arp/seq timing, chorus, per-note randomisation, mod
@@ -210,54 +240,26 @@ Build/validate everything here before touching Android.
 
 ### Tempo sync (not numbered — no reordering)
 
-- [ ] **Internal master tempo for LFO/arp/glide** — one master BPM that LFO
-      rate and arp tempo (and, later, the step sequencer) can each
-      optionally lock to, with its own division/ratio so the rate scales
-      proportionally rather than being forced identical. Nothing exists
-      today: each tempo-driven consumer (currently only `Arpeggiator`) owns
-      an independent `StepClock` and reads its own raw BPM atomic every
-      block. Design rationale and the "this is not host sync" distinction
-      are in architecture.md's "Tempo sync" section.
-      **Still open:**
-      (a) does each existing rate atom (`arpTempoBpm`, `lfoRateHz`) get a
-      paired new sync-enable + division field, leaving the raw value as the
-      "sync off" fallback — that's what "each with its own division"
-      implies, but wants stating explicitly before it's built;
+- [ ] **Internal master tempo for LFO/arp/glide** — Design + build order:
+      [tempo-sync-design.md](tempo-sync-design.md). One shared `masterTempoBpm`
+      replaces `arpTempoBpm`/`seqTempoBpm`; arp and sequencer each keep their
+      own Division combo. LFO syncs to the master tempo via the existing
+      `StepClock` beat-ratio table (fractions of a beat, matching arp/seq);
+      the separate "LFO should sweep even slower" ask is a decoupled
+      free-run-floor widening, not folded into the sync ratios. Design
+      doc written 2026-08-29; build steps not yet started.
+      **Was open, now settled** (see the design doc's intro for the
+      reasoning):
+      (a) settled — one shared dial (masterTempoBpm), not a per-consumer
+      sync-enable + fallback;
+      (c) settled — item 7 is done, so `StepClock`'s own "wait for a second
+      owner" condition is already satisfied; building now.
+      **Still open, deliberately:**
       (b) does glide time meaningfully lock to tempo at all, given it's a
       one-shot transition rather than a periodic rate — two different
       features hide under that one idea ("glide takes 1 beat" vs. "glide's
       seconds value scales with tempo") and neither is committed to yet;
-      (c) build the LFO/arp half now, or wait for item 7 (step sequencer) so
-      the shared-clock concept only gets factored out once, per
-      `StepClock`'s own comment about when that becomes worth doing
-
-### Settings persistence (not numbered — no reordering)
-
-- [ ] **Save/reload all synth settings, including a preset system** —
-      nothing is persisted anywhere in this app today: `createStateXml`,
-      `ApplicationProperties`, `PropertiesFile`, `ValueTree` all return zero
-      hits in `Source/`, and `juce_data_structures` isn't linked yet (same
-      gap already flagged in the device-settings item above — linking it
-      once serves both). Distinct from, and independent of, that
-      device-settings item (audio/MIDI device selection, much narrower) —
-      confirmed independent by ui-design.md's own "out of scope" note.
-      A preset needs to hold every `VoiceParameters` atomic plus **arp
-      performance state**: the latched Hold-mode chord (`Arpeggiator`'s
-      `latched`/`numLatched`/`latchAwaitingFreshChord`, see
-      arpeggiator-design.md section 8) — e.g. a preset that ships already
-      arpeggiating a C-major chord — not raw live key state, which is
-      transient and doesn't make sense to "restore".
-      A curated collection of good presets could ship permanently with the
-      app.
-      **Still open:** (a) preset file format — `juce::ValueTree` + XML is
-      the natural JUCE-idiomatic pick given `juce_data_structures`, but
-      undecided; (b) where shipped presets physically live — embedded as
-      `BinaryData` (the same pattern `AvijiatorFonts` already uses,
-      immutable with the .exe) vs. written to a user folder at first launch
-      (user-editable in place); (c) if tempo sync (above) lands first, its
-      new sync-enable/division fields need to be part of what a preset
-      saves — not a blocker, just needs revisiting in whichever order these
-      two get built
+      left for a future item, out of the design doc's scope
 
 ### WAV output / recording (not numbered — no reordering)
 
@@ -327,7 +329,7 @@ Build/validate everything here before touching Android.
       the live `DEVICESETUP`/`MIDIINPUT` XML; relaunched and quit again,
       confirmed the file round-tripped cleanly with no corruption or
       duplication. cdb self-test clean (0 assertions) both before and after.
-- [ ] **Step sequencer's default pitch is a real but inaudible frequency,
+- [x] **Step sequencer's default pitch is an audible frequency,
       not "off"** — `VoiceParameters::stepPitchLog2Hz` (`Source/DSP/VoiceParameters.h`)
       is a zero-initialized `std::array`, the same convention every other
       per-step field uses (gate, accent, slide, the cutoff/resonance lanes),

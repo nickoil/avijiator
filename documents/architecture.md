@@ -145,7 +145,15 @@ step sequencer below inherits.
   the envelope
 - Same clock/trigger plumbing as the arp underneath
 
-### Tempo sync (planned, not built)
+### Tempo sync (design done, not built)
+
+Full design and build order: [tempo-sync-design.md](tempo-sync-design.md).
+Settled: one shared `masterTempoBpm` (not a per-consumer sync-enable +
+fallback) drives both the arpeggiator and the step sequencer, each still
+via its own `StepClock` instance and its own Division combo; the LFO syncs
+to that same master tempo through the existing `StepClock` beat-ratio table.
+**Still open** (unchanged from below): whether glide time locks to tempo at
+all.
 
 An internal **master tempo** that the LFO rate and arp tempo — and, once
 built, the step sequencer — can each optionally lock to, with its own
