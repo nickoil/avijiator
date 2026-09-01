@@ -56,7 +56,9 @@ target_sources(Avijiator
         Source/DSP/NoteStack.cpp
         Source/UI/PanelLookAndFeel.cpp
         Source/UI/PanelSection.cpp
-        Source/UI/SynthPanel.cpp)
+        Source/UI/SynthPanel.cpp
+        Source/Presets/PresetSerialization.cpp
+        Source/Presets/PresetBrowserUI.cpp)
 
 # Quoted includes already resolve relative to the including file, so this is
 # convenience, not a requirement. Keep writing includes in relative form

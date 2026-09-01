@@ -3,6 +3,9 @@
 
 #include <cmath>
 
+#include "Presets/PresetBrowserUI.h"
+#include "Presets/PresetSerialization.h"
+
 //==============================================================================
 namespace
 {
@@ -19,6 +22,13 @@ namespace
     }
 
     constexpr const char* audioDeviceStateKey = "audioDeviceState";
+
+    // Tier A (documents/settings-persistence-design.md section 3) - the
+    // same appProperties instance, a second key alongside the device-state
+    // one above. An anonymous preset, saved under a fixed key instead of a
+    // user-chosen filename - it and Tier B's named presets share the exact
+    // same toXml/fromXml pair.
+    constexpr const char* synthStateKey = "synthState";
 
     // Split out from the callback so it can be tested without MIDI hardware -
     // the conversion is the part most likely to be subtly wrong, and wrong
@@ -176,7 +186,20 @@ MainComponent::MainComponent()
     // work), rather than the full StepDivision range LFO's own Sync Division
     // combo sees.
     runAttachChoiceOffsetSelfTest();
+
+    // Item 9: a silent round-trip bug (a dropped field, a display-name
+    // collision quietly merging two different parameters, a float losing
+    // precision through the XML text form) would otherwise surface as "this
+    // preset sounds slightly different" weeks later, not as a crash - see
+    // documents/settings-persistence-design.md section 10.
+    runPresetRoundTripSelfTest();
    #endif
+
+    // Item 9, section 9: a curated starting set, written once, only if the
+    // Presets folder doesn't exist yet. Before Tier A's load below is fine
+    // either way - the two are independent (Tier A lives in appProperties,
+    // this writes into PresetSerialization::getPresetsFolder()).
+    PresetBrowserUI::writeFactoryPresetsIfMissing();
 
     qwertyInput.onNoteEvent = [this] (const NoteEvent& event)
     {
@@ -184,6 +207,17 @@ MainComponent::MainComponent()
     };
 
     panel.onAudioSettingsClicked = [this] { showAudioSettings(); };
+
+    // Item 9, section 6 - each only reports its click, same reasoning as
+    // onAudioSettingsClicked above not reaching for the AudioDeviceManager
+    // itself: the dialogs need voice.getParameters() AND arp, which
+    // SynthPanel doesn't own.
+    panel.onSavePresetClicked = [this] { PresetBrowserUI::showSaveDialog (voice.getParameters(), arp); };
+    panel.onLoadPresetClicked = [this]
+    {
+        PresetBrowserUI::showLoadDialog (voice.getParameters(), arp,
+                                          [this] { panel.refreshControlsFromParameters(); });
+    };
 
     addAndMakeVisible (panel);
 
@@ -201,6 +235,28 @@ MainComponent::MainComponent()
     appProperties.setStorageParameters (devicePropertiesOptions());
     std::unique_ptr<juce::XmlElement> savedDeviceState (
         appProperties.getUserSettings()->getXmlValue (audioDeviceStateKey));
+
+    // Item 9, Tier A (documents/settings-persistence-design.md section 3) -
+    // loaded here, after device state and before setAudioChannels below
+    // starts the audio callbacks, into voice/arp (both already constructed -
+    // see the member order in MainComponent.h). Nothing saved yet on
+    // first-ever launch leaves voice/arp exactly at their own in-class-
+    // initializer defaults, same as a fresh VoiceParameters/Arpeggiator
+    // always start.
+    if (std::unique_ptr<juce::XmlElement> savedSynthState (
+            appProperties.getUserSettings()->getXmlValue (synthStateKey));
+        savedSynthState != nullptr && savedSynthState->hasTagName (PresetSerialization::rootTagName))
+    {
+        PresetSerialization::fromXml (*savedSynthState, voice.getParameters(), arp);
+
+        // fromXml only writes the atomics - panel's widgets (already
+        // constructed and self-seeded to their own in-class defaults, via
+        // the init list above) need pushing back into sync separately, or
+        // the panel would silently show last session's DEFAULTS rather than
+        // what was actually just restored. Same gap a Tier B Load hit first
+        // - see SynthPanel::refreshControlsFromParameters' own comment.
+        panel.refreshControlsFromParameters();
+    }
 
     // Passing the saved state (nullptr on first-ever launch) restores the
     // same audio device *and* the same set of enabled MIDI inputs as last
@@ -302,6 +358,13 @@ MainComponent::~MainComponent()
     // settings" item.
     appProperties.getUserSettings()->setValue (audioDeviceStateKey,
                                                 deviceManager.createStateXml().get());
+
+    // Item 9, Tier A - same instance, same save point, second key. voice and
+    // arp are still fully alive here (destroyed only after this destructor
+    // body returns, in reverse declaration order).
+    appProperties.getUserSettings()->setValue (
+        synthStateKey, PresetSerialization::toXml (voice.getParameters(), arp).get());
+
     appProperties.saveIfNeeded();
 
     // Unregister BEFORE shutdownAudio, for the same reason shutdownAudio is

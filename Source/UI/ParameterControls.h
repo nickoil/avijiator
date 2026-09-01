@@ -206,6 +206,41 @@ inline void attachToggle (juce::ToggleButton& toggle, const ToggleSpec& spec, Vo
 
 //==============================================================================
 /*
+    The INVERSE of attach*'s own seed call: pushes the atomic's CURRENT value
+    into an already-attached widget's displayed position, without re-firing
+    onValueChange/onChange/onClick. For when something other than the widget
+    itself changed the atomic underneath it - a preset load
+    (documents/settings-persistence-design.md), the only case that exists
+    today. Found missing after Load, by a user bug report: the SEQUENCER
+    On toggle (and every other slider/combo/toggle) kept showing whatever it
+    displayed before the load, silently out of sync with the atomic the load
+    just changed - correct audio, wrong-looking panel. dontSendNotification
+    throughout is what stops this from re-storing the very value it just
+    read back into the atomic it came from.
+*/
+inline void refreshKnob (juce::Slider& slider, const KnobSpec& spec, const VoiceParameters& params)
+{
+    const auto raw = (params.*(spec.target)).load (std::memory_order_relaxed);
+    slider.setValue (spec.storeAsLog2 ? std::exp2 (raw) : raw, juce::dontSendNotification);
+}
+
+inline void refreshChoice (juce::ComboBox& comboBox, const ChoiceSpec& spec, const VoiceParameters& params)
+{
+    const auto raw = (params.*(spec.target)).load (std::memory_order_relaxed);
+
+    // Inverse of attachChoice's onChange - see ChoiceSpec::firstChoiceValue's
+    // own comment for the offset this undoes.
+    comboBox.setSelectedId (raw - spec.firstChoiceValue + 1, juce::dontSendNotification);
+}
+
+inline void refreshToggle (juce::ToggleButton& toggle, const ToggleSpec& spec, const VoiceParameters& params)
+{
+    toggle.setToggleState ((params.*(spec.target)).load (std::memory_order_relaxed) != 0,
+                            juce::dontSendNotification);
+}
+
+//==============================================================================
+/*
     Item 7 build step 6: the "index-based attach-helper" documents/
     step-sequencer-design.md section 4 calls for, alongside attachKnob/
     attachChoice/attachToggle above. Not an attach helper in the same sense

@@ -177,6 +177,43 @@ and the 6×16 step arrays from section 2, using the same `serializedName`
 convention for consistency, and reusing `loadStepValue`/`storeStepValue`
 (`ParameterControls.h:192-204`) for the array indices.
 
+**Built, two deviations from the above, both found empirically rather than
+foreseen here:**
+
+1. **Table-name prefix instead of a `serializedName` field on every entry.**
+   `SynthPanel::forEachSerializableParameter` (declared `SynthPanel.h`,
+   defined `SynthPanel.cpp`) walks all 16 (not 13 - LFO's Sync toggle and
+   OUTPUT's own section postdate this doc) `KnobSpec`/`ChoiceSpec`/
+   `ToggleSpec` tables and keys each entry `"<table>.<display name>"` (e.g.
+   `"arp.Gate"`, `"seq.Gate"`) instead of adding a hand-typed
+   `serializedName` string to every one of the ~33 entries. Same uniqueness
+   guarantee this section asked for - a collision needs the SAME table AND
+   the same display name, and no table repeats a display name internally -
+   with no new field to type, and risk skipping on one entry, across every
+   existing initializer. (The exact "Tempo"/"Tempo" collision this section
+   used as its motivating example no longer exists - `tempo-sync-design.md`
+   merged `arpTempoBpm`/`seqTempoBpm` into one shared `masterTempoBpm` before
+   this item was built - but the underlying `KnobSpec`/`ChoiceSpec` correctness
+   requirement is still real: "Gate" (`arpKnobSpecs`/`seqKnobSpecs`),
+   "Division" (`arpChoiceSpecs`/`seqChoiceSpecs`), and "On"
+   (`arpToggleSpecs`/`seqToggleSpecs`) all still collide on display name
+   today, and the self-test's Scenario 1 proves the prefix keeps them
+   distinct by giving every visited field its own value via a running
+   counter, not a hand-picked pair.)
+2. **`<Param key="..." value="..."/>` child elements, not plain XML
+   attributes keyed by name.** Several display names contain characters an
+   XML attribute NAME cannot - a space (`"Pulse Width"`, `"Glide Time"`,
+   `"Sync Division"`, `"Note Priority"`) or `->` (`"Env->Cutoff"`,
+   `"->Pitch"`, `"->Cutoff"`). `xml->setAttribute(key, value)` with such a
+   key fired a real `JUCE_ASSERT` (`xml/juce_XmlElement.cpp:76`) the first
+   time this ran under the project's cdb self-test check - not a case
+   reasoned about in advance. An attribute VALUE has no such restriction, so
+   each entry became its own `<Param>` child instead, with the key carried
+   as `key="..."` data rather than as the element's own attribute name.
+   `PresetSerialization.cpp`'s `findParam()` does the linear key lookup on
+   load - ~33 entries, a rare message-thread operation, so an O(n²) scan
+   costs nothing worth optimizing.
+
 ---
 
 ## 5. Arp-latch thread safety (new plumbing — doesn't exist today)
@@ -234,6 +271,19 @@ or while Seq/Keys currently own the voice, simply sits primed until the arp
 is switched on — exactly the "ships already arpeggiating a chord" scenario
 TODO.md describes. No new arbitration logic needed.
 
+**Built, one simplification from "updated... whenever the latch actually
+changes" above:** `publishLatchSnapshot()` is called unconditionally at
+`resolveActiveNotes()`'s single exit point (restructured from its original
+four independent `return`s to get one call site) every time it runs, not
+only when the latch's contents actually differ from last time. Cheap - a
+bounded, `NoteStack::maxHeldNotes`-sized array of atomic stores - and this
+is also what makes the self-test's own approach valid: the test drives
+`resolveActiveNotes()` directly, exactly as section 10 asks for, and a
+"changed" latch reached via `Arpeggiator`'s real public API is exactly the
+"whenever it changes" event that section already described - unconditional
+publication just avoids adding a second, redundant comparison to detect
+what the caller already knows it just did.
+
 ---
 
 ## 6. Preset browser UI
@@ -263,6 +313,49 @@ left to the build step itself, consistent with how `architecture.md`'s UI
 section treats "real answer needs a human at the screen" — the two dialogs'
 starting shape (name field; scrollable list with load/delete per row) is a
 reasonable first pass, not a locked mockup.
+
+**Built:** the pixel-level placement this section left open settled as
+exactly between `autovijiButton` and `audioSettingsButton` (user's explicit
+call) — left-to-right, Autoviji, Save, Load, Audio Settings. Both dialogs'
+content and the factory-bank writer live in `Source/Presets/
+PresetBrowserUI.h/.cpp`, a free-function namespace rather than a class -
+neither dialog has state that outlives the single call that launches it.
+Both close via `findParentComponentOfClass<juce::DialogWindow>()->
+exitModalState(0)` from their own Save/Cancel/Load button `onClick`s - the
+same self-deleting-on-close mechanism `showAudioSettings()`'s own comment
+already documents (`LaunchOptions::launchAsync()`'s modal state is entered
+with `deleteWhenDismissed = true`), just triggered programmatically instead
+of only via the native title bar's close box.
+
+**Built, a gap this section didn't anticipate: the panel's WIDGETS need
+pushing back into sync after a load, separately from the atomics.**
+`fromXml` only ever writes into `VoiceParameters`/`Arpeggiator` atomics -
+exactly right for the audio thread, which reads those directly and would
+have started sequencing/arpeggiating correctly either way - but every
+slider, combo box and toggle on `SynthPanel` was attached to its atomic
+once, at construction, via `attachKnob`/`attachChoice`/`attachToggle`'s own
+one-time seed call. Nothing was pulling a widget's displayed position back
+from the atomic on any LATER external change, because until this item the
+only such change was `masterOctaveShift` via comma/period (`refreshOctaveReadout`,
+documents/note-handling-design.md section 7). A user bug report (Load not
+lighting the SEQUENCER On toggle, despite the sequencer correctly being
+about to run) surfaced that a preset load is a second, much larger case of
+exactly that same gap - every field, not one.
+
+Fixed generically rather than one toggle at a time: `ParameterControls.h`
+gained `refreshKnob`/`refreshChoice`/`refreshToggle` - the inverse of
+`attachKnob`/`attachChoice`/`attachToggle`'s own seed call, pushing the
+atomic's current value into the widget with `dontSendNotification` instead
+of the other direction - and `SynthPanel::refreshControlsFromParameters()`
+walks the same 16 tables `forEachSerializableParameter`/the constructor's
+`wireKnobs`/`wireChoices` already walk, calling the matching `refresh*` on
+each cell. `MainComponent` calls it after Tier A's startup restore AND
+after a Tier B Load completes (`PresetBrowserUI::showLoadDialog` grew an
+`onLoaded` callback parameter for the latter, since the load itself happens
+asynchronously, inside the dialog, well after `showLoadDialog` itself
+returns). `stepGrid.repaint()` covers the step arrays, which paint straight
+from `VoiceParameters` every time already - no separate refresh path
+needed there.
 
 ---
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <span>
 
@@ -222,6 +223,58 @@ public:
     */
     HeldNotes resolveActiveNotes (HeldNotes liveNotes, bool holdEnabled) noexcept;
 
+    //==============================================================================
+    /*
+        Save/load plumbing for the latched (Hold) chord - documents/
+        settings-persistence-design.md section 5. New for item 9:
+        latched/numLatched/latchAwaitingFreshChord (below) are plain,
+        audio-thread-private data with zero public accessors otherwise, and a
+        preset save/load happens on the message thread.
+
+        Plain data, no atomics itself - the atomics are the backing storage
+        on Arpeggiator (see getLatchSnapshot/requestLatchLoad), this is just
+        the value type passed between threads.
+    */
+    struct LatchSnapshot
+    {
+        std::array<std::uint8_t, (size_t) NoteStack::maxHeldNotes> noteNumbers {};
+        std::array<float, (size_t) NoteStack::maxHeldNotes> pitchesLog2Hz {};
+        std::array<float, (size_t) NoteStack::maxHeldNotes> velocities {};
+        int numLatched = 0;
+        bool awaitingFreshChord = true;
+    };
+
+    /*
+        ANY THREAD (in practice, the message thread, at the moment of a
+        preset save). Reads the save-side atomics the audio thread keeps
+        fresh (publishLatchSnapshot, called every block from process() -
+        the latch changes rarely, but a save only ever wants the LATEST
+        state, not a history of every change, so there is no FIFO here).
+
+        A torn read across slots is harmless, same "torn read is fine"
+        convention this codebase already applies to the step-sequencer
+        arrays (VoiceParameters.h) - this is a rare, one-shot,
+        user-initiated read, not a hot path needing double-buffering.
+    */
+    LatchSnapshot getLatchSnapshot() const noexcept;
+
+    /*
+        MESSAGE THREAD only. Stores the snapshot into a pending-load buffer
+        and arms hasPendingLatchLoad; process() picks it up at the top of the
+        next block, entirely on the audio thread (the same "check a flag at
+        block boundary" shape VoiceOwner's hand-over already uses). This
+        preserves the existing invariant that latched/numLatched/
+        latchAwaitingFreshChord are touched from the audio thread only - the
+        message thread only ever writes the separate pending-snapshot state
+        below.
+
+        ORDERING REQUIREMENT ON THE CALLER: a preset load also loads
+        arpEnabled/arpHold (ordinary VoiceParameters atomics). This must be
+        called no later than those are written, so both land together by the
+        next block boundary.
+    */
+    void requestLatchLoad (const LatchSnapshot& snapshot) noexcept;
+
 private:
     //==============================================================================
     // How much of a step the note actually sounds for. Clamped rather than
@@ -270,6 +323,29 @@ private:
     // empty (T5's phrase boundary) or hold is off, cleared once a fresh
     // phrase has replaced the latch. See resolveActiveNotes.
     bool latchAwaitingFreshChord = true;
+
+    //==============================================================================
+    // Save-side mirror of latched/numLatched/latchAwaitingFreshChord above -
+    // documents/settings-persistence-design.md section 5. Kept fresh every
+    // block from process() (publishLatchSnapshot(), called right after
+    // resolveActiveNotes - cheap, and simpler than only publishing on an
+    // actual change). int, not uint8_t, for the note-number atomics - same
+    // "guaranteed lock-free" reasoning VoiceParameters.h gives for using int
+    // over smaller/bool atomics everywhere else in this codebase.
+    std::array<std::atomic<int>, (size_t) NoteStack::maxHeldNotes> latchedNoteNumberAtomics {};
+    std::array<std::atomic<float>, (size_t) NoteStack::maxHeldNotes> latchedPitchAtomics {};
+    std::array<std::atomic<float>, (size_t) NoteStack::maxHeldNotes> latchedVelocityAtomics {};
+    std::atomic<int> numLatchedAtomic { 0 };
+    std::atomic<bool> latchAwaitingFreshChordAtomic { true };
+
+    void publishLatchSnapshot() noexcept;
+
+    // Message-thread -> audio-thread handoff for a preset load (section 5).
+    // pendingLatchLoad itself is plain data, not atomics - hasPendingLatchLoad
+    // is the single flag gating it, so a release store here paired with the
+    // acquire exchange in process() is what makes reading it back safe.
+    LatchSnapshot pendingLatchLoad {};
+    std::atomic<bool> hasPendingLatchLoad { false };
 
     // The arp's OWN generator, with a seed distinct from the audible noise
     // source, the filter's floor noise and the LFO's sample-and-hold - which

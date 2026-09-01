@@ -950,6 +950,27 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
     autovijiButton.onClick = [this] { randomizeSequence(); };
     addAndMakeVisible (autovijiButton);
 
+    // Item 9 (documents/settings-persistence-design.md section 6) - header
+    // row, between Autoviji and Audio Settings. Plain onClick-only buttons,
+    // same shape as audioSettingsButton/autovijiButton above.
+    savePresetButton.setButtonText ("Save");
+    savePresetButton.setWantsKeyboardFocus (false);
+    savePresetButton.onClick = [this]
+    {
+        if (onSavePresetClicked != nullptr)
+            onSavePresetClicked();
+    };
+    addAndMakeVisible (savePresetButton);
+
+    loadPresetButton.setButtonText ("Load");
+    loadPresetButton.setWantsKeyboardFocus (false);
+    loadPresetButton.onClick = [this]
+    {
+        if (onLoadPresetClicked != nullptr)
+            onLoadPresetClicked();
+    };
+    addAndMakeVisible (loadPresetButton);
+
     // The fixed design size, per section 3 - NOT the real window size. Step
     // 6's scale transform maps this onto whatever the actual window is.
     setSize (designWidth, designHeight);
@@ -966,11 +987,116 @@ void SynthPanel::refreshOctaveReadout()
                                  juce::dontSendNotification);
 }
 
+void SynthPanel::refreshControlsFromParameters()
+{
+    // Same 16-table shape as forEachSerializableParameter and the
+    // constructor's own wireKnobs/wireChoices - see that method's comment
+    // for why all three independently list the same tables rather than
+    // sharing one true source: each does something different enough with
+    // (widget, spec) that a shared visitor would need to carry more context
+    // than it saves.
+    auto knobs = [this] (auto& cells, const KnobSpec* specs, int count)
+    {
+        for (int i = 0; i < count; ++i)
+            refreshKnob (cells[(size_t) i].slider, specs[i], params);
+    };
+
+    auto choices = [this] (auto& cells, const ChoiceSpec* specs, int count)
+    {
+        for (int i = 0; i < count; ++i)
+            refreshChoice (cells[(size_t) i].comboBox, specs[i], params);
+    };
+
+    knobs (vcoKnobs, vcoKnobSpecs, numVcoKnobs);
+    knobs (vcfKnobs, vcfKnobSpecs, numVcfKnobs);
+    knobs (envKnobs, envKnobSpecs, numEnvKnobs);
+    choices (envChoices, envChoiceSpecs, numEnvChoices);
+
+    refreshToggle (lfoSyncToggle, lfoToggleSpecs[0], params);
+    knobs (lfoKnobs, lfoKnobSpecs, numLfoKnobs);
+    choices (lfoChoices, lfoChoiceSpecs, numLfoChoices);
+
+    knobs (keyboardKnobs, keyboardKnobSpecs, numKeyboardKnobs);
+    choices (keyboardChoices, keyboardChoiceSpecs, numKeyboardChoices);
+
+    refreshToggle (arpToggleStack.top, arpToggleSpecs[0], params);
+    refreshToggle (arpToggleStack.bottom, arpToggleSpecs[1], params);
+    choices (arpChoices, arpChoiceSpecs, numArpChoices);
+    knobs (arpKnobs, arpKnobSpecs, numArpKnobs);
+
+    knobs (outputKnobs, outputKnobSpecs, numOutputKnobs);
+    refreshOctaveReadout(); // the hand-wired Octave knob - not a KnobSpec cell
+
+    refreshToggle (seqToggleStack.top, seqToggleSpecs[0], params);
+    refreshToggle (seqToggleStack.bottom, seqToggleSpecs[1], params);
+    choices (seqChoices, seqChoiceSpecs, numSeqChoices);
+    knobs (seqKnobs, seqKnobSpecs, numSeqKnobs);
+
+    // Hand-wired, non-spec-table controls (see their own comments in the
+    // constructor for why attachChoice doesn't cover them).
+    seqPatternLengthCombo.setSelectedId (params.seqPatternLength.load (std::memory_order_relaxed),
+                                          juce::dontSendNotification);
+    // seqLaneCombo has no VoiceParameters target (UI-local lane selection) -
+    // nothing for a preset load to disagree with.
+
+    // The step grid reads VoiceParameters fresh on every paint (same
+    // "never cache, always read live" convention currentStepForUi's own
+    // comment describes) - a repaint is all a changed pattern needs.
+    stepGrid.repaint();
+}
+
 SynthPanel::~SynthPanel()
 {
     // Must happen before `lookAndFeel` is destroyed, or JUCE asserts on
     // shutdown - documents/ui-design.md section 7.
     setLookAndFeel (nullptr);
+}
+
+//==============================================================================
+// documents/settings-persistence-design.md section 4. One table-walking
+// lambda per spec kind (KnobSpec -> float, ChoiceSpec/ToggleSpec -> int),
+// called once per existing static table below - the same 16 tables
+// wireKnobs/wireChoices/attachToggle already walk in the constructor, listed
+// here a second time rather than reused from there because the constructor's
+// loop bodies also configure widgets, which this has no widgets to do.
+void SynthPanel::forEachSerializableParameter (
+    const std::function<void (const juce::String&, std::atomic<float> VoiceParameters::*)>& onFloat,
+    const std::function<void (const juce::String&, std::atomic<int> VoiceParameters::*)>& onInt)
+{
+    auto knobs = [&onFloat] (const char* section, const KnobSpec* specs, int count)
+    {
+        for (int i = 0; i < count; ++i)
+            onFloat (juce::String (section) + "." + specs[i].name, specs[i].target);
+    };
+
+    auto choices = [&onInt] (const char* section, const ChoiceSpec* specs, int count)
+    {
+        for (int i = 0; i < count; ++i)
+            onInt (juce::String (section) + "." + specs[i].name, specs[i].target);
+    };
+
+    auto toggles = [&onInt] (const char* section, const ToggleSpec* specs, int count)
+    {
+        for (int i = 0; i < count; ++i)
+            onInt (juce::String (section) + "." + specs[i].name, specs[i].target);
+    };
+
+    knobs   ("vco",      vcoKnobSpecs,      numVcoKnobs);
+    knobs   ("vcf",      vcfKnobSpecs,      numVcfKnobs);
+    knobs   ("env",      envKnobSpecs,      numEnvKnobs);
+    choices ("env",      envChoiceSpecs,    numEnvChoices);
+    knobs   ("lfo",      lfoKnobSpecs,      numLfoKnobs);
+    choices ("lfo",      lfoChoiceSpecs,    numLfoChoices);
+    toggles ("lfo",      lfoToggleSpecs,    numLfoToggles);
+    knobs   ("keyboard", keyboardKnobSpecs, numKeyboardKnobs);
+    choices ("keyboard", keyboardChoiceSpecs, numKeyboardChoices);
+    knobs   ("arp",      arpKnobSpecs,      numArpKnobs);
+    choices ("arp",      arpChoiceSpecs,    numArpChoices);
+    toggles ("arp",      arpToggleSpecs,    numArpToggles);
+    knobs   ("output",   outputKnobSpecs,   numOutputKnobs);
+    knobs   ("seq",      seqKnobSpecs,      numSeqKnobs);
+    choices ("seq",      seqChoiceSpecs,    numSeqChoices);
+    toggles ("seq",      seqToggleSpecs,    numSeqToggles);
 }
 
 //==============================================================================
@@ -1062,6 +1188,8 @@ void SynthPanel::resized()
     constexpr int audioSettingsHeight = 28;
     constexpr int autovijiWidth = 90; // item 8 - narrower than Audio Settings, "Autoviji" is shorter
     constexpr int autovijiGap = 12;   // same as the section-to-section `gap` below
+    constexpr int presetButtonWidth = 64; // "Save"/"Load" are short - narrower than autovijiWidth
+    constexpr int presetButtonGap = 12;   // same as autovijiGap
     // Item 7 build step 6: the pattern grid's own row height, chosen (not
     // derived from PanelSection's cell geometry - StepGrid has no caption
     // strip) to give a vertical-drag gesture a comfortable range, roughly
@@ -1084,7 +1212,18 @@ void SynthPanel::resized()
         audioSettingsButton.setBounds (headerRow.removeFromRight (audioSettingsWidth)
                                                  .withSizeKeepingCentre (audioSettingsWidth, audioSettingsHeight));
 
-        // Item 8 - immediately to Audio Settings' left, same row.
+        // Item 9 - between Autoviji and Audio Settings, same row. Removed
+        // from the right in Load-then-Save order, which places them
+        // left-to-right as Save (nearer Autoviji), Load (nearer Audio
+        // Settings).
+        headerRow.removeFromRight (presetButtonGap);
+        loadPresetButton.setBounds (headerRow.removeFromRight (presetButtonWidth)
+                                              .withSizeKeepingCentre (presetButtonWidth, audioSettingsHeight));
+        headerRow.removeFromRight (presetButtonGap);
+        savePresetButton.setBounds (headerRow.removeFromRight (presetButtonWidth)
+                                              .withSizeKeepingCentre (presetButtonWidth, audioSettingsHeight));
+
+        // Item 8 - immediately to Save's left, same row.
         headerRow.removeFromRight (autovijiGap);
         autovijiButton.setBounds (headerRow.removeFromRight (autovijiWidth)
                                             .withSizeKeepingCentre (autovijiWidth, audioSettingsHeight));

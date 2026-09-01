@@ -67,6 +67,13 @@ public:
     // reach for that itself, so it only reports the click. Wired in step 6.
     std::function<void()> onAudioSettingsClicked;
 
+    // Save/Load open Source/Presets' dialogs, which need Arpeggiator (for the
+    // latch snapshot, documents/settings-persistence-design.md section 5) -
+    // MainComponent owns that, not this panel, so - same reasoning as
+    // onAudioSettingsClicked above - these only report the click.
+    std::function<void()> onSavePresetClicked;
+    std::function<void()> onLoadPresetClicked;
+
     // The OUTPUT panel's Octave knob drags VoiceParameters::masterOctaveShift
     // directly - the shared, global octave transpose, same shift comma/
     // period drive from QwertyNoteInput. Called by MainComponent whenever
@@ -74,8 +81,43 @@ public:
     // sync with whichever input caused it.
     void refreshOctaveReadout();
 
+    // Pushes every widget's displayed value back into sync with whatever
+    // `params` currently holds - the read-back counterpart to the
+    // constructor's one-time attachKnob/attachChoice/attachToggle wiring.
+    // Needed after a preset load (documents/settings-persistence-design.md):
+    // fromXml writes straight into the VoiceParameters atomics, which is
+    // exactly correct for the audio thread but leaves every slider/combo/
+    // toggle on this panel showing whatever it displayed before the load,
+    // silently wrong - found via a user bug report (Load not lighting the
+    // SEQUENCER On toggle even though the sequencer was, correctly, about to
+    // run). Called by MainComponent after Tier A's startup restore and after
+    // a Tier B Load.
+    void refreshControlsFromParameters();
+
     void paint (juce::Graphics&) override;
     void resized() override;
+
+    // documents/settings-persistence-design.md section 4's generic
+    // enumeration: visits every KnobSpec/ChoiceSpec/ToggleSpec-covered field
+    // exactly once, each under a key unique across the whole instrument, so
+    // Source/Presets/PresetSerialization can save/load them without a
+    // second, independently-drifting field list. A future rename to one of
+    // the spec tables below (the kind tempo-sync-design.md's masterTempoBpm
+    // merge already made) keeps the serializer in sync automatically - no
+    // second edit site.
+    //
+    // Section 4 proposed a `serializedName` field on every one of the ~33
+    // entries; this instead prefixes each key with the NAME OF THE TABLE the
+    // entry came from ("arp.Gate", "seq.Gate", ...) - same uniqueness
+    // guarantee (a display-name collision like the two "Gate" knobs or the
+    // three-table "Division"/"On" ones below never merges two different
+    // fields, since it would need a collision on BOTH the table AND the
+    // display name, and no table repeats a display name internally today),
+    // with no new field to type - and risk forgetting - on every existing
+    // initializer. See the .cpp for the full table list.
+    static void forEachSerializableParameter (
+        const std::function<void (const juce::String& key, std::atomic<float> VoiceParameters::*)>& onFloat,
+        const std::function<void (const juce::String& key, std::atomic<int> VoiceParameters::*)>& onInt);
 
 private:
     //==========================================================================
@@ -499,7 +541,7 @@ private:
     // OUTPUT's other global controls, not next to one input source. A plain
     // KnobCell, hand-wired in the constructor rather than through
     // wireKnobs/KnobSpec - masterOctaveShift is an atomic<int> stepped over
-    // 7 whole-octave positions with a "C3"-style text readout, neither of
+    // 7 whole-octave positions with a signed-integer text readout, neither of
     // which KnobSpec's float-continuous/numeric-suffix contract covers, same
     // "doesn't fit the generic shape, hand-wire it" precedent as
     // seqPatternLengthCombo/seqLaneCombo above.
@@ -513,6 +555,14 @@ private:
     // audioSettingsButton - no persistent toggle state, just an onClick that
     // calls randomizeSequence().
     juce::TextButton autovijiButton;
+
+    // Item 9 (documents/settings-persistence-design.md section 6) - header
+    // row, between autovijiButton and audioSettingsButton. Plain
+    // onClick-only buttons, same shape as audioSettingsButton/autovijiButton
+    // above: each only reports its click (onSavePresetClicked/
+    // onLoadPresetClicked), since the dialog they open needs Arpeggiator,
+    // which this panel doesn't own.
+    juce::TextButton savePresetButton, loadPresetButton;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPanel)
 };

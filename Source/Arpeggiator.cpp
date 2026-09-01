@@ -98,6 +98,7 @@ void Arpeggiator::reset() noexcept
     // stopped.
     numLatched = 0;
     latchAwaitingFreshChord = true;
+    publishLatchSnapshot();
 
     clock.reset();
     resetPattern();
@@ -129,6 +130,7 @@ void Arpeggiator::releaseVoice (SynthVoice& voice) noexcept
     // held. That is T4b's hazard arriving through a different door.
     numLatched = 0;
     latchAwaitingFreshChord = true;
+    publishLatchSnapshot();
 
     // Park the clock on a boundary and abandon the phrase, so switching the
     // arp on starts the next chord immediately and from a defined end rather
@@ -165,6 +167,24 @@ int Arpeggiator::gateSamplesForStep (double samplesPerStep, float gateFraction) 
 
 void Arpeggiator::process (SynthVoice& voice, HeldNotes liveNotes, float* output, int numSamples) noexcept
 {
+    // A pending preset-loaded latch (documents/settings-persistence-design.md
+    // section 5), checked at the top of every block - same "check a flag at
+    // block boundary" shape VoiceOwner's hand-over already uses. The acquire
+    // half of the release in requestLatchLoad(), so pendingLatchLoad's plain
+    // (non-atomic) fields are guaranteed visible once this observes true.
+    if (hasPendingLatchLoad.exchange (false, std::memory_order_acquire))
+    {
+        numLatched = pendingLatchLoad.numLatched;
+
+        for (int i = 0; i < numLatched; ++i)
+            latched[(size_t) i] = { pendingLatchLoad.noteNumbers[(size_t) i],
+                                     pendingLatchLoad.pitchesLog2Hz[(size_t) i],
+                                     pendingLatchLoad.velocities[(size_t) i] };
+
+        latchAwaitingFreshChord = pendingLatchLoad.awaitingFreshChord;
+        publishLatchSnapshot(); // so a save immediately after this load sees it too
+    }
+
     auto& parameters = voice.getParameters();
 
     // Tempo and division are a TIME CONSTANT and a discrete switch: read raw
@@ -193,6 +213,13 @@ void Arpeggiator::process (SynthVoice& voice, HeldNotes liveNotes, float* output
     // Discrete switch, raw per block - same treatment as every other atomic
     // here.
     const auto holdEnabled = parameters.arpHold.load (std::memory_order_relaxed) != 0;
+
+    // publishLatchSnapshot() lives INSIDE resolveActiveNotes now (its own
+    // single exit point), not called separately here - see that function's
+    // comment. This keeps the save-side atomics fresh whether
+    // resolveActiveNotes is reached via process() or (documents/
+    // settings-persistence-design.md section 10's own test approach) called
+    // directly.
     const auto active = resolveActiveNotes (liveNotes, holdEnabled);
 
     // T10: THE IDLE FAST PATH. With nothing to arpeggiate this block AND no
@@ -347,6 +374,13 @@ void Arpeggiator::resetPattern() noexcept
 
 Arpeggiator::HeldNotes Arpeggiator::resolveActiveNotes (HeldNotes liveNotes, bool holdEnabled) noexcept
 {
+    // ONE exit point, purely so publishLatchSnapshot() (documents/
+    // settings-persistence-design.md section 5) has one call site covering
+    // every branch below, rather than one inserted before each of what used
+    // to be four independent returns. Behaviour is otherwise unchanged from
+    // before section 5 existed.
+    HeldNotes result;
+
     if (! holdEnabled)
     {
         // T4b/T4d: zeroed on every hold-off call, not just the falling edge -
@@ -354,60 +388,108 @@ Arpeggiator::HeldNotes Arpeggiator::resolveActiveNotes (HeldNotes liveNotes, boo
         // both correct with no edge to catch.
         numLatched = 0;
         latchAwaitingFreshChord = true;
-        return liveNotes;
+        result = liveNotes;
     }
-
-    if (liveNotes.empty())
+    else if (liveNotes.empty())
     {
         // T5: the phrase just ended. Leave the latch exactly as it was, and
         // arm a REPLACE for whatever the next phrase turns out to be, so it
         // does not get unioned onto this one.
         latchAwaitingFreshChord = true;
-        return { latched.data(), (size_t) numLatched };
-    }
-
-    if (latchAwaitingFreshChord)
-    {
-        // T6: a genuinely fresh phrase. REPLACE wholesale - discard whatever
-        // the previous, already-finished phrase left latched.
-        numLatched = (int) liveNotes.size();
-
-        for (int i = 0; i < numLatched; ++i)
-            latched[(size_t) i] = liveNotes[(size_t) i];
-
-        latchAwaitingFreshChord = false;
+        result = { latched.data(), (size_t) numLatched };
     }
     else
     {
-        // T4a, and the fix for the reported bug: UNION, never remove. A real
-        // hand does not release every finger of a chord on the same sample,
-        // so the live set shrinks step by step as it comes up - {C,E,G} then
-        // {C,E} then {C} - and each of those is already a SUBSET of what is
-        // latched, so this adds nothing and (critically) removes nothing. The
-        // old "replace wholesale every non-empty block" rule shrank the latch
-        // on every one of those intermediate blocks and froze on whichever
-        // single note happened to come up last - audibly wrong, and this is
-        // the fix.
-        for (size_t i = 0; i < liveNotes.size(); ++i)
+        if (latchAwaitingFreshChord)
         {
-            const auto noteNumber = liveNotes[i].noteNumber;
-            auto alreadyLatched = false;
+            // T6: a genuinely fresh phrase. REPLACE wholesale - discard
+            // whatever the previous, already-finished phrase left latched.
+            numLatched = (int) liveNotes.size();
 
-            for (int j = 0; j < numLatched; ++j)
-            {
-                if (latched[(size_t) j].noteNumber == noteNumber)
-                {
-                    alreadyLatched = true;
-                    break;
-                }
-            }
+            for (int i = 0; i < numLatched; ++i)
+                latched[(size_t) i] = liveNotes[(size_t) i];
 
-            if (! alreadyLatched && numLatched < (int) latched.size())
-                latched[(size_t) numLatched++] = liveNotes[i];
+            latchAwaitingFreshChord = false;
         }
+        else
+        {
+            // T4a, and the fix for the reported bug: UNION, never remove. A
+            // real hand does not release every finger of a chord on the same
+            // sample, so the live set shrinks step by step as it comes up -
+            // {C,E,G} then {C,E} then {C} - and each of those is already a
+            // SUBSET of what is latched, so this adds nothing and
+            // (critically) removes nothing. The old "replace wholesale every
+            // non-empty block" rule shrank the latch on every one of those
+            // intermediate blocks and froze on whichever single note
+            // happened to come up last - audibly wrong, and this is the fix.
+            for (size_t i = 0; i < liveNotes.size(); ++i)
+            {
+                const auto noteNumber = liveNotes[i].noteNumber;
+                auto alreadyLatched = false;
+
+                for (int j = 0; j < numLatched; ++j)
+                {
+                    if (latched[(size_t) j].noteNumber == noteNumber)
+                    {
+                        alreadyLatched = true;
+                        break;
+                    }
+                }
+
+                if (! alreadyLatched && numLatched < (int) latched.size())
+                    latched[(size_t) numLatched++] = liveNotes[i];
+            }
+        }
+
+        result = { latched.data(), (size_t) numLatched };
     }
 
-    return { latched.data(), (size_t) numLatched };
+    publishLatchSnapshot();
+    return result;
+}
+
+//==============================================================================
+// documents/settings-persistence-design.md section 5.
+void Arpeggiator::publishLatchSnapshot() noexcept
+{
+    numLatchedAtomic.store (numLatched, std::memory_order_relaxed);
+    latchAwaitingFreshChordAtomic.store (latchAwaitingFreshChord, std::memory_order_relaxed);
+
+    for (int i = 0; i < numLatched; ++i)
+    {
+        latchedNoteNumberAtomics[(size_t) i].store (latched[(size_t) i].noteNumber, std::memory_order_relaxed);
+        latchedPitchAtomics[(size_t) i].store (latched[(size_t) i].pitchLog2Hz, std::memory_order_relaxed);
+        latchedVelocityAtomics[(size_t) i].store (latched[(size_t) i].velocity, std::memory_order_relaxed);
+    }
+}
+
+Arpeggiator::LatchSnapshot Arpeggiator::getLatchSnapshot() const noexcept
+{
+    LatchSnapshot snapshot;
+    snapshot.numLatched = numLatchedAtomic.load (std::memory_order_relaxed);
+    snapshot.awaitingFreshChord = latchAwaitingFreshChordAtomic.load (std::memory_order_relaxed);
+
+    // Reads every slot, not just up to numLatched - simpler than a
+    // partial-range read, and slots beyond numLatched are never consulted by
+    // anything that reads the returned struct (see LatchSnapshot's own
+    // comment).
+    for (int i = 0; i < NoteStack::maxHeldNotes; ++i)
+    {
+        snapshot.noteNumbers[(size_t) i] = (std::uint8_t) latchedNoteNumberAtomics[(size_t) i].load (std::memory_order_relaxed);
+        snapshot.pitchesLog2Hz[(size_t) i] = latchedPitchAtomics[(size_t) i].load (std::memory_order_relaxed);
+        snapshot.velocities[(size_t) i] = latchedVelocityAtomics[(size_t) i].load (std::memory_order_relaxed);
+    }
+
+    return snapshot;
+}
+
+void Arpeggiator::requestLatchLoad (const LatchSnapshot& snapshot) noexcept
+{
+    pendingLatchLoad = snapshot;
+
+    // Release: pairs with process()'s acquire exchange, so the plain-data
+    // writes just above are guaranteed visible once that observes true.
+    hasPendingLatchLoad.store (true, std::memory_order_release);
 }
 
 int Arpeggiator::chooseNextIndex (HeldNotes active, ArpPattern pattern) noexcept

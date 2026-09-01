@@ -227,36 +227,37 @@ Build/validate everything here before touching Android.
       display bug, not a crash); **not yet re-confirmed visually** that the
       Division combo now shows "1/8T" after clicking Autoviji - that's the
       user's own eyes to make.
-- [ ] **9. Settings Persistence** — Design + build order:
-      [settings-persistence-design.md](settings-persistence-design.md).
-      Save/reload all synth settings, including a preset system. nothing is persisted anywhere in this app today: `createStateXml`,
-      `ApplicationProperties`, `PropertiesFile`, `ValueTree` all return zero
-      hits in `Source/`, and `juce_data_structures` isn't linked yet (same
-      gap already flagged in the device-settings item above — linking it
-      once serves both). Distinct from, and independent of, that
-      device-settings item (audio/MIDI device selection, much narrower) —
-      confirmed independent by ui-design.md's own "out of scope" note.
-      A preset needs to hold every `VoiceParameters` atomic plus **arp
-      performance state**: the latched Hold-mode chord (`Arpeggiator`'s
-      `latched`/`numLatched`/`latchAwaitingFreshChord`, see
-      arpeggiator-design.md section 8) — e.g. a preset that ships already
-      arpeggiating a C-major chord — not raw live key state, which is
-      transient and doesn't make sense to "restore".
-      A curated collection of good presets could ship permanently with the
-      app.
-      **Was open, now settled** (design doc written 2026-08-30; see its
-      intro for the full reasoning): (a) format is `juce::XmlElement`, not
-      `ValueTree` — matches the only existing serialization precedent in
-      this codebase (device-settings persistence), no second pattern
-      introduced; (b) shipped presets live in the user's settings folder,
-      written at first launch, not embedded `BinaryData` — editable without
-      a rebuild, revisit embedding only if this app is ever distributed;
-      (c) order-independent by construction — the serializer enumerates
-      parameters by name via `SynthPanel`'s spec-table member-pointers, so
-      it survives the tempo-sync rename regardless of which item lands
-      first, at the cost of that rename silently dropping old saved tempo
-      values (accepted trade-off, not a migration bug — see the design
-      doc's section 2).
+- [x] **9. Settings Persistence** — Design + build order:
+      [settings-persistence-design.md](settings-persistence-design.md). Built
+      2026-09-01, all 7 build steps done. Two tiers sharing one
+      `PresetSerialization::toXml`/`fromXml` pair: Tier A (silent
+      session-state auto-restore, `MainComponent`'s `appProperties`, a
+      `synthState` key alongside the existing `audioDeviceState` one) and
+      Tier B (named presets — Save/Load buttons in `SynthPanel`'s header row,
+      between `autovijiButton` and `audioSettingsButton` per this session's
+      placement call — one `.avipreset` XML file per preset in a `Presets/`
+      folder next to the settings folder, plus a small factory-written
+      starting pair on first launch). Covers every `KnobSpec`/`ChoiceSpec`/
+      `ToggleSpec`-covered scalar (via a new `SynthPanel::
+      forEachSerializableParameter` generic enumeration), 4 hand-written
+      scalars, the 6×16 step-sequencer arrays, and the arp's latched
+      (Hold-mode) chord via new lock-free save/load plumbing on
+      `Arpeggiator` (`getLatchSnapshot`/`requestLatchLoad`).
+      Two deviations from the design doc, both found via this project's cdb
+      self-test convention rather than foreseen in the doc: the generic
+      enumeration keys each field `"<table>.<display name>"` instead of a
+      hand-typed `serializedName` per entry (same uniqueness guarantee, no
+      new field to type — and risk skipping — on ~33 existing initializers);
+      and each field serializes as a `<Param key="..." value="..."/>` child
+      element rather than a plain XML attribute, since several display names
+      (`"Pulse Width"`, `"Env->Cutoff"`, ...) aren't valid XML attribute
+      *names* — a real `JUCE_ASSERT` the first cdb run caught, not a
+      hypothetical. See `settings-persistence-design.md` sections 4-6's own
+      "Built" notes for the full record. Verified via build, the cdb
+      self-test convention (0 assertion hits, including the new
+      `runPresetRoundTripSelfTest`), and a real end-to-end run confirming the
+      `Presets/` folder, both factory presets, and the `synthState` key all
+      wrote correctly to `%APPDATA%/Avijiator/`.
 - [ ] **10. Character & "Vim"** — analogue realism + performance-feel layer on
       top of the clean core voice: filter feedback saturation, exponential
       envelope curves, oscillator drift, output noise floor/saturation,
