@@ -48,14 +48,36 @@ struct KnobSpec
 };
 
 // A combo box. Covers Envelope Destination, LFO Waveform, Glide Mode, Note
-// Priority, Arp Pattern, Arp Division.
+// Priority, Arp Pattern, Arp/Seq/LFO-Sync Division.
 struct ChoiceSpec
 {
     const char* name;
     const char* const* choices;
     int numChoices;
+
+    // The TRUE, GLOBAL enum value of the default choice - never a UI-local
+    // index, even when firstChoiceValue below is non-zero. Every existing
+    // ChoiceSpec already followed this (their enum's index IS its value,
+    // since firstChoiceValue was implicitly 0); this comment exists so a
+    // sliced ChoiceSpec's author doesn't accidentally make defaultIndex
+    // relative to `choices` instead.
     int defaultIndex;
+
     std::atomic<int> VoiceParameters::* target;
+
+    // 0 for almost every ChoiceSpec: `choices` starts at the target enum's
+    // own index 0, so the selected combo item's 0-based index already IS
+    // the value to store. Non-zero when `choices` instead points PARTWAY
+    // into a larger shared array (documents/tempo-sync-design.md's
+    // Division combos, extended for arp/seq's "tedious below 1/1"/LFO's
+    // "slow sweeps to 32/1" split - see StepDivision's own comment in
+    // StepClock.h): firstChoiceValue is `choices[0]`'s true enum value, so
+    // attachChoice can add it back to the combo's own 0-based selection
+    // before storing, and subtract it back off when seeding from
+    // defaultIndex. Proven by runAttachChoiceOffsetSelfTest below, not just
+    // asserted - a backwards offset here is a SILENT wrong-division bug,
+    // the same failure class CLAUDE.md flags for clock-adjacent DSP work.
+    int firstChoiceValue = 0;
 };
 
 // A toggle. Covers Arp On and Arp Hold - two ComboBoxes in the throwaway
@@ -146,11 +168,17 @@ inline void attachChoice (juce::ComboBox& comboBox, juce::Label& label,
 
     comboBox.onChange = [&comboBox, &spec, &params]
     {
-        const auto index = comboBox.getSelectedId() - 1;
+        const auto index = comboBox.getSelectedId() - 1 + spec.firstChoiceValue;
         (params.*(spec.target)).store (index, std::memory_order_relaxed);
     };
 
-    comboBox.setSelectedId (spec.defaultIndex + 1, juce::dontSendNotification);
+    // defaultIndex is always the TRUE global value (spec.defaultIndex's own
+    // comment) - subtract firstChoiceValue back off here since setSelectedId
+    // wants a combo-LOCAL id, the exact inverse of onChange's own +
+    // firstChoiceValue above. Zero for every ChoiceSpec that isn't sliced
+    // into a larger array, so this is `spec.defaultIndex + 1` exactly as
+    // before for all of them.
+    comboBox.setSelectedId (spec.defaultIndex - spec.firstChoiceValue + 1, juce::dontSendNotification);
 
     // Seed, matching attachKnob's pattern.
     comboBox.onChange();
@@ -252,3 +280,69 @@ struct MomentaryButton : public juce::TextButton
             onPressedChanged (false);
     }
 };
+
+//==============================================================================
+#if JUCE_DEBUG
+
+// Debug-only self-test, run once at startup.
+//
+// Proves ChoiceSpec::firstChoiceValue's offset arithmetic (attachChoice,
+// above) against a REAL juce::ComboBox - not a re-implementation of the +/-
+// firstChoiceValue maths, same "output is the only proof" discipline every
+// other self-test in this codebase follows. Deliberately independent of
+// StepDivision: a synthetic 3-entry slice of an imagined 5-entry master
+// list, proving the mechanism once so every sliced ChoiceSpec (the Division
+// combos, documents/tempo-sync-design.md's follow-up work - whatever else
+// slices a shared list tomorrow) inherits the proof rather than needing its
+// own. A backwards offset here is a SILENT wrong-value bug for whichever
+// atomic a sliced ChoiceSpec targets - exactly the failure class CLAUDE.md
+// flags for clock-adjacent DSP work, which is why this exists at all rather
+// than trusting the arithmetic by eye.
+//
+// Scratch VoiceParameters, targeting an arbitrary existing atomic
+// (envelopeDestination) purely as somewhere to store into - this test has
+// nothing to do with envelope routing itself.
+inline void runAttachChoiceOffsetSelfTest()
+{
+    // Imagine a 5-entry master list "A".."E" (true values 0..4) and a combo
+    // that only exposes the 3-entry slice "B","C","D" - true values 1..3 -
+    // so firstChoiceValue is 1 (choices[0], "B"'s, own true value).
+    static const char* const sliceChoices[] = { "B", "C", "D" };
+
+    const ChoiceSpec spec
+    {
+        "Test",
+        sliceChoices,
+        3,
+        2,                                      // defaultIndex: "C"'s TRUE value
+        &VoiceParameters::envelopeDestination,
+        1                                       // firstChoiceValue: "B"'s TRUE value
+    };
+
+    VoiceParameters params;
+    juce::ComboBox comboBox;
+    juce::Label label;
+
+    attachChoice (comboBox, label, spec, params);
+
+    // SEED: must land on the true default (2, "C") - a wrong sign here would
+    // seed 2 - 1 = 1 ("B") or 2 + 1 = 3 ("D") instead.
+    jassert (params.envelopeDestination.load (std::memory_order_relaxed) == 2);
+
+    // FIRST exposed item ("B", combo-local id 1) must store its true value,
+    // firstChoiceValue itself (1) - not 0, which is what a missing offset
+    // would store.
+    comboBox.setSelectedId (1, juce::dontSendNotification);
+    comboBox.onChange();
+    jassert (params.envelopeDestination.load (std::memory_order_relaxed) == 1);
+
+    // LAST exposed item ("D", combo-local id 3) must store
+    // firstChoiceValue + numChoices - 1 = 1 + 3 - 1 = 3 - not 2, which is
+    // what ignoring the offset (storing the combo-local index verbatim)
+    // would give.
+    comboBox.setSelectedId (3, juce::dontSendNotification);
+    comboBox.onChange();
+    jassert (params.envelopeDestination.load (std::memory_order_relaxed) == 3);
+}
+
+#endif

@@ -4,20 +4,37 @@
 
 //==============================================================================
 /*
-    Triangle / square / sample-and-hold LFO. One phase accumulator, same style
-    as the audio oscillator, but no PolyBLEP - LFO rates are sub-audio, so
-    aliasing doesn't apply at the ranges this covers.
+    Triangle / square / sample-and-hold / ramp / sine LFO. One phase
+    accumulator, same style as the audio oscillator, but no PolyBLEP - LFO
+    rates are sub-audio, so aliasing doesn't apply at the ranges this covers.
+    That reasoning covers Ramp's hard discontinuity the same way it already
+    covered Square's.
 
     Sample-and-hold: draws a new random value from its own seeded
     NoiseGenerator exactly at each phase wrap, holds it constant until the
     next one - classic stepped/glitchy character, not a smoothed random walk.
 
-    Full derivation in documents/envelope-lfo-design.md section 3.
+    Ramp added at the user's request: rises linearly -1 -> +1 across the
+    cycle, then resets - the "ramp up" convention, not "ramp down"/reverse
+    saw. Easy to flip (negate `value`, or reverse the -1..+1 traversal) if
+    the opposite direction turns out to be what was actually wanted - flagged
+    here rather than silently assumed, since either reading of "ramp" is
+    common LFO terminology.
+
+    Full derivation in documents/envelope-lfo-design.md section 3 (original
+    three waveforms only - Ramp/Sine are a later, undocumented-in-that-doc
+    addition).
 */
 class Lfo
 {
 public:
-    enum class Waveform { Triangle, Square, SampleAndHold };
+    // Order matches the UI combo box exactly (SynthPanel.cpp's
+    // lfoWaveformChoices), the user's own choice of display order - every
+    // reference to a specific waveform elsewhere in the codebase (this
+    // file's own switch, VoiceParameters.h's default, the tempo-sync
+    // self-test) is by name, not by underlying int, so this order is free to
+    // change without touching any of them.
+    enum class Waveform { Ramp, Triangle, Sine, Square, SampleAndHold };
 
     void prepare (double newSampleRate) noexcept;
     void reset() noexcept;

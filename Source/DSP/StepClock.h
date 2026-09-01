@@ -13,10 +13,29 @@
     names anyway - so the table earns its place twice.
 
     Ordered longest-step-first, so a combo box built from it reads slow -> fast.
+    Whole/Half added on top of the original Quarter..ThirtySecond range at the
+    user's request (more, slower Division options) - no triplet variant for
+    either, matching ThirtySecond's own precedent of not every division
+    having one. ThirtyTwoBars..TwoBars added on top of THAT, at the user's
+    further request for the LFO specifically ("slow evolutions of sound",
+    long sweeps down to 32 bars) - arp/seq's own Division combo deliberately
+    does NOT expose these five (SynthPanel.cpp's arpChoiceSpecs/
+    seqChoiceSpecs slice this same table starting at Whole, via ChoiceSpec's
+    firstChoiceValue - see that field's own comment in ParameterControls.h),
+    since a single arp/seq step lasting more than a bar stops being a
+    "slow groove" and becomes tedious - the LFO's own Sync Division combo is
+    the only one that sees the full range.
 */
 enum class StepDivision : int
 {
-    Quarter = 0,
+    ThirtyTwoBars = 0,  // 32/1 - 128 beats
+    SixteenBars,        // 16/1 - 64 beats
+    EightBars,          // 8/1  - 32 beats
+    FourBars,           // 4/1  - 16 beats
+    TwoBars,            // 2/1  - 8 beats
+    Whole,               // 1/1 - 4 beats
+    Half,                // 1/2 - 2 beats
+    Quarter,
     QuarterTriplet,
     Eighth,
     EighthTriplet,
@@ -25,12 +44,19 @@ enum class StepDivision : int
     ThirtySecond
 };
 
-static constexpr int numStepDivisions = 7;
+static constexpr int numStepDivisions = 14;
 
 inline constexpr double beatsPerStepForDivision (StepDivision division) noexcept
 {
     constexpr double table[numStepDivisions] =
     {
+        128.0,      // 32/1
+        64.0,       // 16/1
+        32.0,       // 8/1
+        16.0,       // 4/1
+        8.0,        // 2/1
+        4.0,        // 1/1
+        2.0,        // 1/2
         1.0,        // 1/4
         2.0 / 3.0,  // 1/4T  - three of these fill two beats
         0.5,        // 1/8
@@ -262,6 +288,27 @@ inline void runStepClockSelfTest()
     //==========================================================================
     // Straight divisions halve cleanly.
     {
+        jassert (std::abs (beatsPerStepForDivision (StepDivision::ThirtyTwoBars)
+                            - 2.0 * beatsPerStepForDivision (StepDivision::SixteenBars)) < 1.0e-12);
+
+        jassert (std::abs (beatsPerStepForDivision (StepDivision::SixteenBars)
+                            - 2.0 * beatsPerStepForDivision (StepDivision::EightBars)) < 1.0e-12);
+
+        jassert (std::abs (beatsPerStepForDivision (StepDivision::EightBars)
+                            - 2.0 * beatsPerStepForDivision (StepDivision::FourBars)) < 1.0e-12);
+
+        jassert (std::abs (beatsPerStepForDivision (StepDivision::FourBars)
+                            - 2.0 * beatsPerStepForDivision (StepDivision::TwoBars)) < 1.0e-12);
+
+        jassert (std::abs (beatsPerStepForDivision (StepDivision::TwoBars)
+                            - 2.0 * beatsPerStepForDivision (StepDivision::Whole)) < 1.0e-12);
+
+        jassert (std::abs (beatsPerStepForDivision (StepDivision::Whole)
+                            - 2.0 * beatsPerStepForDivision (StepDivision::Half)) < 1.0e-12);
+
+        jassert (std::abs (beatsPerStepForDivision (StepDivision::Half)
+                            - 2.0 * beatsPerStepForDivision (StepDivision::Quarter)) < 1.0e-12);
+
         jassert (std::abs (beatsPerStepForDivision (StepDivision::Quarter)
                             - 2.0 * beatsPerStepForDivision (StepDivision::Eighth)) < 1.0e-12);
 

@@ -49,7 +49,7 @@ live-performance app once the core voice/arpeggiator is solid. Full reasoning an
 - [documents/settings-persistence-design.md](documents/settings-persistence-design.md)
   — save/reload + presets design (item 8, in progress)
 - [documents/tempo-sync-design.md](documents/tempo-sync-design.md) — shared
-  master tempo for LFO/arp/glide (not yet started)
+  master tempo for LFO/arp/glide (built)
 - [documents/character-and-vim.md](documents/character-and-vim.md) —
   analogue realism / performance-feel layer spec (item 9, later)
 - [documents/step-automation.md](documents/step-automation.md) — generalised

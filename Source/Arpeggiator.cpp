@@ -175,7 +175,7 @@ void Arpeggiator::process (SynthVoice& voice, HeldNotes liveNotes, float* output
     //
     // Safe to call every block: an unchanged value does not move the countdown
     // (asserted in runStepClockSelfTest).
-    clock.setTempo ((double) parameters.arpTempoBpm.load (std::memory_order_relaxed),
+    clock.setTempo ((double) parameters.masterTempoBpm.load (std::memory_order_relaxed),
                      (StepDivision) parameters.arpDivision.load (std::memory_order_relaxed));
 
     const auto pattern = arpPatternFromIndex (parameters.arpPattern.load (std::memory_order_relaxed));
@@ -1106,7 +1106,7 @@ namespace
             // The fastest musical step, so a step is ~6 blocks rather than ~30.
             // This is a transition test, not a timing test - runStepClockSelfTest
             // owns the maths - so short steps buy density for nothing.
-            p.arpTempoBpm.store (300.0f);
+            p.masterTempoBpm.store (300.0f);
             p.arpDivision.store ((int) StepDivision::ThirtySecond);
 
             startDevice();
@@ -1433,7 +1433,7 @@ void runArpTransitionSelfTest()
                     // pending gate-off - the second of section 3's three
                     // reasons the loop tracks two deadlines instead of
                     // assuming they alternate.
-                    case 9:  rig.parameters().arpTempoBpm.store (roll (2) == 0 ? 20.0f : 300.0f); break;
+                    case 9:  rig.parameters().masterTempoBpm.store (roll (2) == 0 ? 20.0f : 300.0f); break;
 
                     // Likewise both ends of the gate clamp, where a rounding
                     // slip would give a zero-length or a full-step gate.

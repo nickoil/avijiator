@@ -31,8 +31,8 @@ class SynthPanel final : public juce::Component
 public:
     // documents/ui-design.md section 3 - the one place item 6 makes a
     // decision Stage B has to live with. Confirmed by step 1's canvas
-    // mockup. designHeight grew from 660 in item 7 build step 6, exactly the
-    // resize documents/step-sequencer-design.md section 9 flagged as
+    // mockup. designHeight grew 660 -> 840 in item 7 build step 6, exactly
+    // the resize documents/step-sequencer-design.md section 9 flagged as
     // expected rather than a Polish-step afterthought - the real
     // SEQUENCER control cluster plus the 16-cell pattern grid replacing the
     // old 90px reserved strip needed real room. Flagged, not silent: this
@@ -40,7 +40,21 @@ public:
     // landscape shape than ui-design.md section 3's own letterboxing
     // discussion already worried about at 660 - the Android-port cost
     // question CLAUDE.md leaves open is unaffected in kind, only in degree.
-    static constexpr int designWidth = 1280;
+    //
+    // Both constants moved several times across tempo-sync-design.md's build
+    // and its UI follow-ups. designWidth: 1280 -> 1456 (LFO's two new cells
+    // widened row B - "grow the canvas, don't rob the row's other sections",
+    // same principle as designHeight's own item-7 growth above) -> 1252 once
+    // OUTPUT left row B (first for its own row, then for SEQUENCER's),
+    // shrinking row B back to 3 sections and 1212px raw, same as row A -
+    // envRowWidthCompensation's own comment has the exact arithmetic; stable
+    // at 1252 since (SEQUENCER's row absorbed OUTPUT without needing more
+    // width - that row was never budgeted to designWidth in the first
+    // place). designHeight: 840 -> 1004 when OUTPUT briefly had its own row
+    // (one PanelSection::heightForCells(), 152px, plus its trailing gap,
+    // 12px) -> back to 840 once OUTPUT joined SEQUENCER's existing row
+    // instead of needing a new one.
+    static constexpr int designWidth = 1252;
     static constexpr int designHeight = 840;
 
     // pushNoteEventIn is router.pushUiEvent, handed in by MainComponent in
@@ -239,10 +253,16 @@ private:
     // Cell counts per section - documents/ui-design.md section 2's table.
     static constexpr int numVcoKnobs = 5, numVcfKnobs = 3;
     static constexpr int numEnvKnobs = 4, numEnvChoices = 1;
-    static constexpr int numLfoKnobs = 3, numLfoChoices = 1;
+    // numLfoChoices/numLfoToggles grew by tempo-sync-design.md's build step 4:
+    // Sync Division (a new ChoiceSpec, reusing arpDivisionChoices) and Sync
+    // (LFO's first-ever toggle, a plain ToggleButton in its own cell - not a
+    // stack, see lfoSyncToggle's own comment below).
+    static constexpr int numLfoKnobs = 3, numLfoChoices = 2, numLfoToggles = 1;
     static constexpr int numKeyboardKnobs = 1, numKeyboardChoices = 2;
-    static constexpr int numArpKnobs = 2, numArpChoices = 2, numArpToggles = 2;
-    static constexpr int numOutputKnobs = 1;
+    // numArpKnobs shrank / numOutputKnobs grew: Tempo moved out of ARP to
+    // OUTPUT, next to Level - see outputKnobSpecs' own comment in the .cpp.
+    static constexpr int numArpKnobs = 1, numArpChoices = 2, numArpToggles = 2;
+    static constexpr int numOutputKnobs = 2;
 
     // Item 7 build step 6's own SEQUENCER control cluster - not part of
     // documents/ui-design.md section 2's original table (that document is
@@ -262,7 +282,8 @@ private:
     //     already IS that index, but seqPatternLength is a plain 1..16
     //     COUNT, not an enum, so index and value are off by exactly one.
     //     Wiring it by hand stores getSelectedId() itself instead.
-    static constexpr int numSeqKnobs = 2;    // Tempo, Gate
+    static constexpr int numSeqKnobs = 1;    // Gate only - Tempo knob removed,
+                                              // see tempo-sync-design.md
     static constexpr int numSeqChoices = 1;  // Division only - see above
     static constexpr int numSeqToggles = 2;  // On, Record (item 7 build step 7) -
                                               // stacked into ONE cell via
@@ -281,18 +302,35 @@ private:
     static_assert (numVcoKnobs + numVcfKnobs + numEnvKnobs + numLfoKnobs
                        + numKeyboardKnobs + numArpKnobs + numOutputKnobs == 19,
                    "19 knobs total - documents/ui-design.md section 2");
-    static_assert (numEnvChoices + numLfoChoices + numKeyboardChoices + numArpChoices == 6,
-                   "6 combo boxes total - documents/ui-design.md section 2");
-    static_assert (numArpToggles == 2, "2 toggles total - documents/ui-design.md section 2");
+    // 7, not item 6's original 6 - documents/tempo-sync-design.md's LFO Sync
+    // Division combo is the one addition since ui-design.md section 2 was
+    // written.
+    static_assert (numEnvChoices + numLfoChoices + numKeyboardChoices + numArpChoices == 7,
+                   "7 combo boxes total - documents/ui-design.md section 2's original 6, "
+                   "plus tempo-sync-design.md's LFO Sync Division combo");
 
-    // Row A (VCO|VCF|ENV) has 3 sections against row B (LFO|KEYBOARD|ARP|
-    // OUTPUT)'s 4, so it has one FEWER inter-section gap and falls short of
-    // row B's total width by exactly one gap plus the missing section's own
-    // edge padding: 1240px (row B, section 3's full usable width) minus
-    // 1212px (row A's raw total) = 28px. Spent on ENV's Destination cell
-    // (both the addCell and the widthForCells calls in the .cpp) rather than
-    // a fourth, purely cosmetic section.
-    static constexpr int envRowWidthCompensation = 28;
+    // 3, not item 6's original 2 - documents/tempo-sync-design.md's LFO Sync
+    // toggle is the one addition (item 7's own seqToggleStack pair stays
+    // excluded, same reasoning as numSeqToggles' own comment above).
+    static_assert (numArpToggles + numLfoToggles == 3,
+                   "3 toggles total - documents/ui-design.md section 2's original 2 (arp "
+                   "On/Hold), plus tempo-sync-design.md's LFO Sync toggle");
+
+    // Row A (VCO|VCF|ENV) and row B (LFO|KEYBOARD|ARP) both have 3 sections
+    // now, so this constant is back to 0 - the width math (below) happens to
+    // land exactly even without spending anything on ENV's Destination cell.
+    // Non-zero at two earlier points, both since undone: originally 28px
+    // (item 6: row B had a 4th section, OUTPUT, that row A had no
+    // equivalent for); briefly 204px after tempo-sync-design.md's LFO growth
+    // widened row B to 1416px while row B still had 4 sections. OUTPUT
+    // moving to its own row under ARP (outputSection's own comment) dropped
+    // row B back to 3 sections, and by coincidence row A's own 13 knob/
+    // choice cells across 3 sections (5+3+5) exactly match row B's new 13
+    // (6+3+4) - same section count, same total cell count, so the two
+    // widthForCells sums are identical with no help needed. Left in place
+    // (not deleted) rather than assumed permanent - the mechanism is one
+    // edit away if either row's cell count changes again.
+    static constexpr int envRowWidthCompensation = 0;
 
     static const KnobSpec vcoKnobSpecs[numVcoKnobs];
     static const KnobSpec vcfKnobSpecs[numVcfKnobs];
@@ -300,6 +338,7 @@ private:
     static const ChoiceSpec envChoiceSpecs[numEnvChoices];
     static const KnobSpec lfoKnobSpecs[numLfoKnobs];
     static const ChoiceSpec lfoChoiceSpecs[numLfoChoices];
+    static const ToggleSpec lfoToggleSpecs[numLfoToggles];
     static const KnobSpec keyboardKnobSpecs[numKeyboardKnobs];
     static const ChoiceSpec keyboardChoiceSpecs[numKeyboardChoices];
     static const KnobSpec arpKnobSpecs[numArpKnobs];
@@ -422,23 +461,46 @@ private:
     std::array<KnobCell, numEnvKnobs> envKnobs;
     std::array<ChoiceCell, numEnvChoices> envChoices;
 
+    // Sync toggle cell goes first (documents/tempo-sync-design.md build step
+    // 4), same "toggle cell first" precedent as ARP/SEQUENCER below - a
+    // plain juce::ToggleButton in its own cell, not a ToggleStack: LFO gains
+    // exactly one toggle, so a 2-slot stack doesn't fit and a new stack
+    // variant for exactly one button isn't worth inventing. lfoSyncCaption
+    // is blank, existing purely to satisfy addCell's two-component contract -
+    // same as arpToggleCaption/seqToggleCaption above.
     PanelSection lfoSection { "LFO" };
+    juce::Label lfoSyncCaption;
+    juce::ToggleButton lfoSyncToggle;
     std::array<KnobCell, numLfoKnobs> lfoKnobs;
-    std::array<ChoiceCell, numLfoChoices> lfoChoices;
+    std::array<ChoiceCell, numLfoChoices> lfoChoices; // Waveform, Sync Division
 
     PanelSection keyboardSection { "KEYBOARD" };
     std::array<KnobCell, numKeyboardKnobs> keyboardKnobs;
     std::array<ChoiceCell, numKeyboardChoices> keyboardChoices;
 
-    // Cell order here is On+Hold, Pattern, Division, Tempo, Gate - matching
-    // documents/ui-design.md section 2's table, and the order addCell is
-    // called in the constructor.
+    // Cell order here is On+Hold, Pattern, Division, Gate - matching
+    // documents/ui-design.md section 2's table (minus Tempo, moved to OUTPUT
+    // - see outputKnobs' own comment below), and the order addCell is called
+    // in the constructor.
     PanelSection arpSection { "ARPEGGIATOR" };
     ToggleStack arpToggleStack;
     juce::Label arpToggleCaption; // blank - see the ToggleStack comment above
     std::array<ChoiceCell, numArpChoices> arpChoices;
     std::array<KnobCell, numArpKnobs> arpKnobs;
 
+    // Tempo moved here from ARP, next to Level - masterTempoBpm reads
+    // globally (arp, sequencer, synced LFO), so OUTPUT's plain
+    // global-controls cluster reads truer than a section named for one of
+    // its three consumers. Cell order: Level, Tempo.
+    //
+    // Position has moved twice since, both user follow-ups after seeing the
+    // built panel: first off row B onto its own row directly under ARP
+    // (`outputSection.setBounds` at arpSection's own X, bypassing `place`),
+    // then onto SEQUENCER's row, immediately to its right, going back
+    // through `place` like every other row-A/row-B section - see that row's
+    // own comment in the .cpp. SEQUENCER's row is natural-width, not
+    // budgeted (same as row A/B's own note), so OUTPUT riding along adds no
+    // width-matching obligation the way row B's version once did.
     PanelSection outputSection { "OUTPUT" };
     std::array<KnobCell, numOutputKnobs> outputKnobs;
 
@@ -455,7 +517,7 @@ private:
     ToggleStack seqToggleStack;
     juce::Label seqToggleCaption; // blank - see arpToggleCaption's identical precedent above
     std::array<ChoiceCell, numSeqChoices> seqChoices; // Division only
-    std::array<KnobCell, numSeqKnobs> seqKnobs;       // Tempo, Gate
+    std::array<KnobCell, numSeqKnobs> seqKnobs;       // Gate
 
     // NOT ChoiceSpec/attachChoice cells - see numSeqChoices' own comment
     // above for why each of these needs hand-wiring rather than the generic

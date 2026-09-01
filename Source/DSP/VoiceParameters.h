@@ -131,6 +131,17 @@ struct VoiceParameters
     // Discrete, no smoother - matches envelopeDestination's treatment.
     std::atomic<int> lfoWaveform { (int) Lfo::Waveform::Triangle };
 
+    // Tempo sync (documents/tempo-sync-design.md). Discrete, no smoother -
+    // same treatment as lfoWaveform just above. Off on first load: the LFO
+    // must free-run at lfoRateHz out of the box, same "must play normally"
+    // reasoning as arpEnabled/seqEnabled.
+    std::atomic<int> lfoSyncEnabled { 0 };
+
+    // Which StepDivision the synced LFO locks to - reuses StepClock's own
+    // beat-ratio table (StepClock.h) rather than a second one, per the design
+    // doc's section 3. Only consulted while lfoSyncEnabled is set.
+    std::atomic<int> lfoSyncDivision { (int) StepDivision::Sixteenth };
+
     // Octaves. Directly scale a modulation amount every sample, so - like
     // envToCutoffDepthOctaves above - these ARE smoothed.
     std::atomic<float> lfoToPitchDepthOctaves { 0.0f };
@@ -186,6 +197,17 @@ struct VoiceParameters
     std::atomic<float> glideTimeSeconds { 0.0f };
 
     //==============================================================================
+    // Tempo sync (documents/tempo-sync-design.md). Replaces the two
+    // independent atomics arpTempoBpm/seqTempoBpm used to each own below -
+    // one shared dial, per the design doc's decision (a). Arp and sequencer
+    // keep their own Division atomics untouched; only the BPM source is now
+    // shared. A TIME CONSTANT, raw per block, same reasoning as the two
+    // atomics it replaces - read once per block by Arpeggiator::process and
+    // StepSequencer::process, each still calling its own StepClock::setTempo
+    // independently.
+    std::atomic<float> masterTempoBpm { 120.0f };
+
+    //==============================================================================
     // Item 5 (arpeggiator).
     //
     // Strictly NOT voice parameters - the arp is a peer class owned by
@@ -205,13 +227,6 @@ struct VoiceParameters
     std::atomic<int> arpPattern { (int) ArpPattern::Up };
     std::atomic<int> arpDivision { (int) StepDivision::Sixteenth };
     std::atomic<int> arpHold { 0 };
-
-    // A TIME CONSTANT, raw per block - same category as lfoRateHz and the ADSR
-    // times: it is never assigned as an output, and changing it affects only
-    // the length of FUTURE steps. Smoothing it would be actively wrong rather
-    // than merely wasteful, since it is consumed once per STEP rather than per
-    // sample - a smoother would low-pass a value nobody reads continuously.
-    std::atomic<float> arpTempoBpm { 120.0f };
 
     // A FRACTION of the step, not a time, so changing tempo does not also
     // change articulation. Read at exactly one instant per step, so likewise
@@ -235,7 +250,7 @@ struct VoiceParameters
     // Read by index at each step boundary, one read per field per step. A
     // torn read across fields is harmless - the whole step is consumed
     // together at one instant - same "raw atomics, no smoothing at the point
-    // of read" convention as arpTempoBpm/arpGateLength above.
+    // of read" convention as masterTempoBpm/arpGateLength above.
 
     // Log2(Hz), same convention as pitch everywhere else in this file - so a
     // step's pitch sums in octaves with everything else already built that
@@ -310,13 +325,6 @@ struct VoiceParameters
     std::atomic<int> seqEnabled { 0 };
     std::atomic<int> seqDivision { (int) StepDivision::Sixteenth };
     std::atomic<int> seqPatternLength { seqMaxSteps };
-
-    // A TIME CONSTANT, raw per block - same reasoning as arpTempoBpm. A
-    // deliberately SEPARATE atomic, not shared with the arp: mirrors
-    // StepClock's own "own instance per owner" precedent (section 1's
-    // decision table). A shared master tempo stays TODO.md's separate
-    // "Tempo sync" item.
-    std::atomic<float> seqTempoBpm { 120.0f };
 
     // A FRACTION of the step, same reasoning and same clamp range as
     // arpGateLength.

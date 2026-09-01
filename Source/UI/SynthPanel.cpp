@@ -6,7 +6,11 @@
 namespace
 {
     const char* const envelopeDestinationChoices[] = { "Filter", "Amp", "Both" };
-    const char* const lfoWaveformChoices[]         = { "Triangle", "Square", "S & H" };
+    // Order follows Lfo::Waveform exactly, same convention as arpPatternChoices
+    // below - the enum's own declaration order was changed to match this
+    // display order (not the other way around), since every reference to a
+    // specific waveform elsewhere is by name, not by underlying int.
+    const char* const lfoWaveformChoices[] = { "Ramp", "Triangle", "Sine", "Square", "S & H" };
     const char* const legatoRetriggerChoices[]     = { "Retrigger", "Legato" };
     const char* const notePriorityChoices[]        = { "Last Note", "Highest Note" };
 
@@ -19,11 +23,23 @@ namespace
                    "the pattern combo box and ArpPattern must stay in step");
 
     // Order and text follow StepDivision exactly - longest step first.
-    // Reused for BOTH the arp's Division combo and, item 7 build step 6, the
-    // sequencer's - StepDivision is one shared enum, and ChoiceSpec's
-    // `choices` is just a pointer, so the same table can back two different
-    // ChoiceSpecs with two different targets.
-    const char* const arpDivisionChoices[] = { "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
+    // Reused for the arp's Division combo, item 7 build step 6's sequencer
+    // one, and tempo-sync-design.md's LFO Sync Division combo - StepDivision
+    // is one shared enum, and ChoiceSpec's `choices` is just a pointer, so
+    // the same table backs several ChoiceSpecs with different targets.
+    // Grown twice at the user's request: 1/1 and 1/2 first, then the five
+    // multi-bar entries (32/1..2/1) on top of that for the LFO specifically
+    // ("slow evolutions of sound") - StepClock.h's own comment on
+    // StepDivision has the full reasoning. Arp/seq's own Division
+    // ChoiceSpecs (arpChoiceSpecs/seqChoiceSpecs below) deliberately slice
+    // OFF the five multi-bar entries via ChoiceSpec::firstChoiceValue - a
+    // single arp/seq step lasting more than a bar is tedious rather than
+    // musical, unlike an LFO sweeping that slowly.
+    const char* const arpDivisionChoices[] =
+    {
+        "32/1", "16/1", "8/1", "4/1", "2/1",             // LFO Sync Division only
+        "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32"
+    };
 
     static_assert ((int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])) == numStepDivisions,
                    "the division combo box and StepDivision's table must stay in step");
@@ -147,11 +163,18 @@ const ChoiceSpec SynthPanel::envChoiceSpecs[numEnvChoices] =
     },
 };
 
+// Rate's floor widened 0.02 -> 0.005 Hz (~200s cycle), documents/
+// tempo-sync-design.md section 1 - free-run mode's own "should be able to
+// sweep even slower" ask, deliberately independent of the sync ratios below.
+// Lfo::setRate has no internal clamp, so this knob range is the only
+// enforcement - and the wider low end needs a skew, same geometric-mean
+// convention as Cutoff/Attack/Decay/Release above, or it would be crammed
+// into the first few pixels of travel.
 const KnobSpec SynthPanel::lfoKnobSpecs[numLfoKnobs] =
 {
-    { "Rate",      0.02, 20.0, 2.0, false, 0.0, " Hz",  &VoiceParameters::lfoRateHz },
-    { "->Pitch",   0.0,   1.0, 0.0, false, 0.0, " oct", &VoiceParameters::lfoToPitchDepthOctaves },
-    { "->Cutoff",  0.0,   8.0, 0.0, false, 0.0, " oct", &VoiceParameters::lfoToCutoffDepthOctaves },
+    { "Rate",      0.005, 20.0, 2.0, false, 0.3162, " Hz",  &VoiceParameters::lfoRateHz },
+    { "->Pitch",   0.0,   1.0, 0.0, false, 0.0,    " oct", &VoiceParameters::lfoToPitchDepthOctaves },
+    { "->Cutoff",  0.0,   8.0, 0.0, false, 0.0,    " oct", &VoiceParameters::lfoToCutoffDepthOctaves },
 };
 
 const ChoiceSpec SynthPanel::lfoChoiceSpecs[numLfoChoices] =
@@ -163,6 +186,25 @@ const ChoiceSpec SynthPanel::lfoChoiceSpecs[numLfoChoices] =
         (int) Lfo::Waveform::Triangle,
         &VoiceParameters::lfoWaveform
     },
+    // Reuses arpDivisionChoices - documents/tempo-sync-design.md section 4: a
+    // third user of that one shared table, same "one table, several
+    // ChoiceSpecs with different targets" precedent the arp/seq split above
+    // already established. Unlike arp/seq's own Division ChoiceSpecs, this
+    // one is NOT sliced (no firstChoiceValue) - the LFO is the one consumer
+    // that sees the full range, multi-bar entries included.
+    {
+        "Sync Division",
+        arpDivisionChoices,
+        (int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])),
+        (int) StepDivision::Sixteenth,
+        &VoiceParameters::lfoSyncDivision
+    },
+};
+
+// LFO's first-ever toggle - see lfoSyncToggle's own comment in SynthPanel.h.
+const ToggleSpec SynthPanel::lfoToggleSpecs[numLfoToggles] =
+{
+    { "Sync", 0, &VoiceParameters::lfoSyncEnabled },
 };
 
 // Glide Time's range starts at 0.0, so it can't take a geometric-mean
@@ -193,13 +235,14 @@ const ChoiceSpec SynthPanel::keyboardChoiceSpecs[numKeyboardChoices] =
     },
 };
 
-// Range matches StepClock's/the arpeggiator's own clamps, so a knob can
-// never ask for something the clock or walker will silently refuse - same
-// reasoning as the throwaway debugChoiceSpecs table.
+// Range matches the arp's own gate-fraction clamp, so the knob can never ask
+// for something the walker will silently refuse - same reasoning as the
+// throwaway debugChoiceSpecs table. Tempo used to live here too (Tempo,
+// Gate) - moved to OUTPUT, next to Level, once masterTempoBpm was reading
+// live: see outputKnobSpecs' own comment below.
 const KnobSpec SynthPanel::arpKnobSpecs[numArpKnobs] =
 {
-    { "Tempo", 20.0, 300.0, 120.0, false, 0.0, " BPM", &VoiceParameters::arpTempoBpm  },
-    { "Gate",  0.05,  0.95,  0.50, false, 0.0, "",     &VoiceParameters::arpGateLength },
+    { "Gate", 0.05, 0.95, 0.50, false, 0.0, "", &VoiceParameters::arpGateLength },
 };
 
 const ChoiceSpec SynthPanel::arpChoiceSpecs[numArpChoices] =
@@ -213,10 +256,13 @@ const ChoiceSpec SynthPanel::arpChoiceSpecs[numArpChoices] =
     },
     {
         "Division",
-        arpDivisionChoices,
-        (int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])),
-        (int) StepDivision::Sixteenth,
-        &VoiceParameters::arpDivision
+        // Sliced to Whole..ThirtySecond - see arpDivisionChoices' own
+        // comment above for why the five multi-bar entries are LFO-only.
+        arpDivisionChoices + (int) StepDivision::Whole,
+        numStepDivisions - (int) StepDivision::Whole,
+        (int) StepDivision::Sixteenth,   // TRUE global default - ChoiceSpec's own comment
+        &VoiceParameters::arpDivision,
+        (int) StepDivision::Whole        // firstChoiceValue
     },
 };
 
@@ -229,18 +275,25 @@ const ToggleSpec SynthPanel::arpToggleSpecs[numArpToggles] =
     { "Hold", 0, &VoiceParameters::arpHold    },
 };
 
+// Tempo moved here from ARP (arpKnobSpecs' own comment above) - reconsidered
+// after tempo-sync-design.md's build: masterTempoBpm reads globally now (arp,
+// sequencer and the synced LFO all follow it), so a control panel position
+// implying it's arp-owned was misleading. OUTPUT, next to Level, has no such
+// implication - a plain global-controls cluster.
 const KnobSpec SynthPanel::outputKnobSpecs[numOutputKnobs] =
 {
-    { "Level", 0.0, 1.0, 0.25, false, 0.0, "", &VoiceParameters::outputLevel },
+    { "Level", 0.0,   1.0, 0.25, false, 0.0, "",    &VoiceParameters::outputLevel  },
+    { "Tempo", 20.0, 300.0, 120.0, false, 0.0, " BPM", &VoiceParameters::masterTempoBpm },
 };
 
-// Item 7 build step 6. Tempo/Gate ranges mirror the arp's own knobs exactly
+// Item 7 build step 6. Gate range mirrors the arp's own knob exactly
 // (arpKnobSpecs above) - same StepClock-backed clamps, same reasoning: a
 // knob must never be able to ask for something the clock or the sequencer's
-// own gate-fraction clamp will silently refuse.
+// own gate-fraction clamp will silently refuse. Tempo knob removed -
+// documents/tempo-sync-design.md: the sequencer now reads the shared
+// masterTempoBpm dial, which lives in OUTPUT (outputKnobSpecs above).
 const KnobSpec SynthPanel::seqKnobSpecs[numSeqKnobs] =
 {
-    { "Tempo", 20.0, 300.0, 120.0, false, 0.0, " BPM", &VoiceParameters::seqTempoBpm  },
     { "Gate",  0.05,  0.95,  0.50, false, 0.0, "",     &VoiceParameters::seqGateLength },
 };
 
@@ -248,10 +301,13 @@ const ChoiceSpec SynthPanel::seqChoiceSpecs[numSeqChoices] =
 {
     {
         "Division",
-        arpDivisionChoices,
-        (int) (sizeof (arpDivisionChoices) / sizeof (arpDivisionChoices[0])),
-        (int) StepDivision::Sixteenth,
-        &VoiceParameters::seqDivision
+        // Sliced the same way as arpChoiceSpecs' own Division entry - see
+        // arpDivisionChoices' own comment above.
+        arpDivisionChoices + (int) StepDivision::Whole,
+        numStepDivisions - (int) StepDivision::Whole,
+        (int) StepDivision::Sixteenth,   // TRUE global default
+        &VoiceParameters::seqDivision,
+        (int) StepDivision::Whole        // firstChoiceValue
     },
 };
 
@@ -733,16 +789,22 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
         envSection.addCell (cell.label, cell.comboBox, false, envRowWidthCompensation);
     }
 
+    // Sync toggle cell first - same "toggle cell goes first" precedent as
+    // ARP/SEQUENCER below.
+    attachToggle (lfoSyncToggle, lfoToggleSpecs[0], params);
+    lfoSection.addCell (lfoSyncCaption, lfoSyncToggle, false);
+
     wireKnobs (lfoKnobs, lfoKnobSpecs, numLfoKnobs, lfoSection);
     wireChoices (lfoChoices, lfoChoiceSpecs, numLfoChoices, lfoSection);
 
     wireKnobs (keyboardKnobs, keyboardKnobSpecs, numKeyboardKnobs, keyboardSection);
     wireChoices (keyboardChoices, keyboardChoiceSpecs, numKeyboardChoices, keyboardSection);
 
-    // ARP's cell order is On+Hold, Pattern, Division, Tempo, Gate
-    // (documents/ui-design.md section 2) - the toggle-stack cell is added
-    // FIRST, before the choices/knobs below, so PanelSection's cells land in
-    // that same order.
+    // ARP's cell order is On+Hold, Pattern, Division, Gate - documents/
+    // ui-design.md section 2's original order minus Tempo, moved to OUTPUT
+    // (outputKnobSpecs' own comment) - the toggle-stack cell is added FIRST,
+    // before the choices/knobs below, so PanelSection's cells land in that
+    // same order.
     attachToggle (arpToggleStack.top, arpToggleSpecs[0], params);
     attachToggle (arpToggleStack.bottom, arpToggleSpecs[1], params);
     arpSection.addCell (arpToggleCaption, arpToggleStack);
@@ -937,8 +999,20 @@ void SynthPanel::randomizeSequence()
     // as the toggle sync below: store the atomic directly, then sync the
     // widget's own displayed state to match (attachChoice's onChange is
     // built to store FROM the widget, not the other way round).
+    //
+    // The combo's own id is NOT (int) StepDivision::EighthTriplet + 1 - seq's
+    // Division combo is sliced (seqChoiceSpecs' own Division entry,
+    // firstChoiceValue = StepDivision::Whole), so its ids are offset from the
+    // enum's true global values. Same inverse attachChoice's own seeding
+    // uses (ParameterControls.h): subtract firstChoiceValue back off before
+    // adding the usual +1. Getting this wrong doesn't crash - it just hands
+    // setSelectedId an id with no matching item, which JUCE quietly shows as
+    // no selection at all rather than asserting - exactly what happened
+    // before this fix.
     params.seqDivision.store ((int) StepDivision::EighthTriplet, std::memory_order_relaxed);
-    seqChoices[0].comboBox.setSelectedId ((int) StepDivision::EighthTriplet + 1, juce::dontSendNotification);
+    seqChoices[0].comboBox.setSelectedId ((int) StepDivision::EighthTriplet
+                                               - seqChoiceSpecs[0].firstChoiceValue + 1,
+                                           juce::dontSendNotification);
 
     constexpr int autovijiPatternLength = 8;
     params.seqPatternLength.store (autovijiPatternLength, std::memory_order_relaxed);
@@ -1054,15 +1128,17 @@ void SynthPanel::resized()
     }
     area.removeFromTop (gap);
 
-    // Section row B: LFO | KEYBOARD | ARP | OUTPUT. These four sections'
-    // widthForCells sum plus three sectionGaps fill the row's 1240px exactly
-    // - see documents/ui-design.md section 3's horizontal budget.
+    // Section row B: LFO | KEYBOARD | ARP. OUTPUT used to close this row out
+    // (four sections); now rides along on SEQUENCER's row instead - see
+    // outputSection's own comment in SynthPanel.h for the full history.
+    // These three sections' widthForCells sum plus two sectionGaps once
+    // again totals exactly row A's own width (envRowWidthCompensation's own
+    // comment) - designWidth's own comment in SynthPanel.h has the rest.
     {
         auto row = area.removeFromTop (PanelSection::heightForCells());
-        place (row, lfoSection, numLfoKnobs + numLfoChoices);
+        place (row, lfoSection, 1 + numLfoKnobs + numLfoChoices); // 1 = the Sync toggle cell
         place (row, keyboardSection, numKeyboardKnobs + numKeyboardChoices);
         place (row, arpSection, 1 + numArpChoices + numArpKnobs); // 1 = the On/Hold stacked cell
-        place (row, outputSection, numOutputKnobs);
     }
     area.removeFromTop (gap);
 
@@ -1070,6 +1146,8 @@ void SynthPanel::resized()
     // control cluster is left-aligned at its own natural width (like every
     // other section) rather than stretched to fill the row - not every row
     // needs to hit the 1240px budget exactly, only rows A/B did (section 3).
+    // OUTPUT shares this row now, immediately to SEQUENCER's right - see
+    // outputSection's own comment in SynthPanel.h for why it moved here.
     {
         auto row = area.removeFromTop (PanelSection::heightForCells());
         // 1 = the On/Record stacked cell (numSeqToggles is 2 controls but ONE
@@ -1078,6 +1156,7 @@ void SynthPanel::resized()
         // and Lane cells - neither is a ChoiceSpec, see numSeqChoices' own
         // comment in SynthPanel.h.
         place (row, seqControlSection, 1 + numSeqChoices + numSeqKnobs + 2);
+        place (row, outputSection, numOutputKnobs);
     }
     area.removeFromTop (gap);
 

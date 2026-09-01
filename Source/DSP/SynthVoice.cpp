@@ -188,7 +188,19 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
     // both read once per block like everything else in this category - see
     // documents/envelope-lfo-design.md section 5.
     lfo.setWaveform ((Lfo::Waveform) parameters.lfoWaveform.load (std::memory_order_relaxed));
-    lfo.setRate (parameters.lfoRateHz.load (std::memory_order_relaxed));
+
+    // Tempo sync (documents/tempo-sync-design.md section 3): reuses
+    // StepClock's own beatsPerStepForDivision table rather than a second
+    // Hz-from-BPM-and-division conversion - no new StepClock instance
+    // needed, since that function is a free constexpr. Read raw once per
+    // block in both branches, unsmoothed, same "time constant" category as
+    // lfoRateHz on its own.
+    const auto effectiveHz = parameters.lfoSyncEnabled.load (std::memory_order_relaxed) != 0
+        ? (float) (1.0 / ((60.0 / (double) parameters.masterTempoBpm.load (std::memory_order_relaxed))
+                           * beatsPerStepForDivision ((StepDivision) parameters.lfoSyncDivision.load (std::memory_order_relaxed))))
+        : parameters.lfoRateHz.load (std::memory_order_relaxed);
+
+    lfo.setRate (effectiveHz);
 
     // Also a time constant, read raw once per block - a change here alters
     // only the rate of an in-progress ramp, never its current position, so
@@ -485,6 +497,101 @@ void runFilterAutomationSelfTest()
     renderOneNoteWithStepMod (0.0f, 0.0f, resonanceBaseline.data(), selfTestBlockSamples);
     renderOneNoteWithStepMod (0.0f, 1.0f, resonanceLifted.data(), selfTestBlockSamples);
     jassert (! (resonanceBaseline == resonanceLifted));
+}
+
+void runLfoTempoSyncSelfTest()
+{
+    // LFO -> cutoff, Square wave, wide depth. Base cutoff (10.0f log2Hz =
+    // ~1kHz) plus/minus 6 octaves clamps to Vcf's own [20, 18000] Hz range
+    // (Vcf.h) at BOTH ends - 65536 Hz clamps to wide-open, 16 Hz clamps to
+    // the floor, well below the ~220 Hz test pitch's fundamental - so the
+    // two LFO phases land on a reliable clamp rather than depending on exact
+    // filter-response numbers. Envelope pinned to Amp with a near-instant
+    // ADSR (same shape as every transition rig in this codebase) so the
+    // amplitude envelope settles to a near-constant sustain almost
+    // immediately, leaving the cutoff-driven brightness swing as the only
+    // thing moving peak amplitude across the render.
+    const auto renderLfoSyncCutoff = [] (bool syncEnabled, float masterTempoBpm, StepDivision syncDivision,
+                                          float freeRunHz, float* output, int numSamples)
+    {
+        SynthVoice voice;
+        auto& parameters = voice.getParameters();
+        parameters.envelopeDestination.store ((int) EnvelopeDestination::Amp);
+        parameters.attackSeconds.store (0.001f);
+        parameters.decaySeconds.store (0.001f);
+        parameters.sustainLevel.store (0.8f);
+        parameters.releaseSeconds.store (0.002f);
+
+        parameters.cutoffLog2Hz.store (10.0f);
+        parameters.resonance.store (0.1f);
+        parameters.outputLevel.store (0.5f);
+        parameters.sawLevel.store (0.7f);
+
+        parameters.lfoWaveform.store ((int) Lfo::Waveform::Square);
+        parameters.lfoToCutoffDepthOctaves.store (6.0f);
+        parameters.lfoRateHz.store (freeRunHz);
+        parameters.lfoSyncEnabled.store (syncEnabled ? 1 : 0);
+        parameters.lfoSyncDivision.store ((int) syncDivision);
+        parameters.masterTempoBpm.store (masterTempoBpm);
+
+        voice.prepare (selfTestSampleRate); // jumps every atomic above straight to target
+        voice.noteOn (selfTestPitchLog2Hz, 1.0f);
+        voice.renderNextBlock (output, numSamples);
+    };
+
+    //==========================================================================
+    // SYNC OFF, INERT PATH: masterTempoBpm/lfoSyncDivision must have ZERO
+    // effect while lfoSyncEnabled is off - two renders that disagree wildly
+    // on both must still be byte-identical.
+    {
+        constexpr int windowSamples = 2400;
+        std::array<float, windowSamples> a {}, b {};
+        renderLfoSyncCutoff (false, 120.0f, StepDivision::Sixteenth,   3.0f, a.data(), windowSamples);
+        renderLfoSyncCutoff (false, 300.0f, StepDivision::ThirtySecond, 3.0f, b.data(), windowSamples);
+        jassert (a == b);
+    }
+
+    //==========================================================================
+    // SYNC ON: checks the exact half-period boundary the sync math predicts,
+    // for two independent BPM/division pairs so this isn't just one lucky
+    // number. Square's own phase (Lfo.cpp) starts at exactly +1 (loud/wide-
+    // open) at phase 0 and flips to -1 (quiet/floor) at phase 0.5, and
+    // Lfo::reset() (called from SynthVoice::prepare) zeroes phase - so
+    // rendering starts precisely at the top of a cycle.
+    const auto checkHalfPeriod = [&renderLfoSyncCutoff] (float masterTempoBpm, StepDivision division, int expectedHalfPeriodSamples)
+    {
+        constexpr int windowMargin = 700;  // settle time clear of both edges - see Vcf's cutoff floor time constant
+        constexpr int windowLength = 200;
+
+        std::array<float, 6000> output {}; // large enough for both test pairs' full period below
+        const auto fullPeriod = 2 * expectedHalfPeriodSamples;
+        jassert (fullPeriod <= (int) output.size());
+
+        renderLfoSyncCutoff (true, masterTempoBpm, division, 3.0f, output.data(), fullPeriod);
+
+        // Loud window: late in the first half, still clear of the boundary.
+        const auto loudStart = expectedHalfPeriodSamples - windowMargin - windowLength;
+        jassert (loudStart >= 0);
+        const auto loudPeak = peakAbs (output.data() + loudStart, windowLength);
+
+        // Quiet window: well into the second half, clear of the filter's own
+        // settling time after the cutoff steps down to the floor.
+        const auto quietStart = expectedHalfPeriodSamples + windowMargin;
+        jassert (quietStart + windowLength <= fullPeriod);
+        const auto quietPeak = peakAbs (output.data() + quietStart, windowLength);
+
+        jassert (loudPeak > 0.01f); // sanity - the loud phase must actually be sounding
+        jassert (quietPeak < loudPeak * 0.5f); // a wrong rate puts this window in the wrong phase
+    };
+
+    // 300 BPM / 1-16 -> 20 Hz -> 2400-sample period, 1200-sample half -
+    // exact at this sample rate (48000 * 0.2 * 0.25 * 2 = 2400).
+    checkHalfPeriod (300.0f, StepDivision::Sixteenth, 1200);
+
+    // 240 BPM / 1-8 -> 8 Hz -> 6000-sample period, 3000-sample half - exact
+    // (48000 * 0.25 * 0.5 * 2 = 6000), and independently confirms this isn't
+    // one lucky BPM/division pair.
+    checkHalfPeriod (240.0f, StepDivision::Eighth, 3000);
 }
 
 #endif

@@ -157,6 +157,19 @@ MainComponent::MainComponent()
     // audio self-test (pure UI), so this is the next one after step 5's
     // above.
     runStepRecordSelfTest();
+
+    // Tempo sync: the LFO-sync computation added inside SynthVoice itself
+    // (documents/tempo-sync-design.md section 3) - independent of the arp/
+    // seq, so this exercises SynthVoice directly, same split as
+    // runAccentDepthSelfTest/runFilterAutomationSelfTest above.
+    runLfoTempoSyncSelfTest();
+
+    // ChoiceSpec::firstChoiceValue's offset arithmetic (ParameterControls.h)
+    // - the mechanism behind arp/seq's Division combo now showing a slice of
+    // a larger shared list (documents/tempo-sync-design.md's follow-up
+    // work), rather than the full StepDivision range LFO's own Sync Division
+    // combo sees.
+    runAttachChoiceOffsetSelfTest();
    #endif
 
     qwertyInput.onNoteEvent = [this] (const NoteEvent& event)

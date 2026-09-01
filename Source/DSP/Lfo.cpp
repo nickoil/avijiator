@@ -1,5 +1,9 @@
 #include "Lfo.h"
 
+#include <cmath>
+
+#include <juce_core/juce_core.h>
+
 void Lfo::prepare (double newSampleRate) noexcept
 {
     inverseSampleRate = 1.0 / newSampleRate;
@@ -43,6 +47,17 @@ float Lfo::processSample() noexcept
 
         case Waveform::SampleAndHold:
             value = heldRandomValue;
+            break;
+
+        case Waveform::Ramp:
+            // Linear -1 at phase 0 to (just short of) +1 at the wrap - "ramp
+            // up", see the class comment. Hard reset back to -1 at the wrap,
+            // same un-anti-aliased treatment as Square above.
+            value = -1.0f + 2.0f * (float) phase;
+            break;
+
+        case Waveform::Sine:
+            value = std::sin (juce::MathConstants<float>::twoPi * (float) phase);
             break;
     }
 

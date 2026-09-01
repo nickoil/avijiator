@@ -273,4 +273,34 @@ void runAccentDepthSelfTest();
 */
 void runFilterAutomationSelfTest();
 
+/*
+    Debug-only self-test, run once at startup.
+
+    Covers documents/tempo-sync-design.md section 3: the LFO-sync computation
+    at the top of renderNextBlock. Output is the only thing that proves it -
+    same approach as every other self-test in this file - not a
+    re-implementation of the Hz-from-BPM-and-division formula it checks.
+
+    - Sync off: masterTempoBpm/lfoSyncDivision must have ZERO effect - two
+      renders with lfoSyncEnabled off but wildly different tempo/division
+      values are byte-identical, proving the inert path is truly inert (same
+      "prove it" style as runFilterAutomationSelfTest's untouched-vs-
+      explicit-zero case above).
+    - Sync on, at two known BPM/division pairs (300 BPM/1-16 -> 20 Hz; 240
+      BPM/1-8 -> 8 Hz): LFO -> cutoff (Square wave, wide depth) turns the
+      output into a loud/quiet square pattern whose half-period is
+      arithmetically known in advance. A loud-phase window placed just before
+      each expected half-period boundary and a quiet-phase window placed well
+      after it (clear of the filter's own settling time) either land on the
+      predicted phase or they don't - a wrong rate puts the quiet window back
+      in the loud phase, or vice versa, so this catches a rate error the same
+      way a wrong-length step would fail runStepClockSelfTest's exact sample
+      arithmetic.
+
+    Whether the synced LFO actually feels locked to the beat by ear is a
+    listening judgement CLAUDE.md's "what you cannot verify" section reserves
+    for the user - this only proves the arithmetic and the wiring.
+*/
+void runLfoTempoSyncSelfTest();
+
 #endif

@@ -145,43 +145,29 @@ step sequencer below inherits.
   the envelope
 - Same clock/trigger plumbing as the arp underneath
 
-### Tempo sync (design done, not built)
+### Tempo sync (built)
 
 Full design and build order: [tempo-sync-design.md](tempo-sync-design.md).
-Settled: one shared `masterTempoBpm` (not a per-consumer sync-enable +
-fallback) drives both the arpeggiator and the step sequencer, each still
-via its own `StepClock` instance and its own Division combo; the LFO syncs
-to that same master tempo through the existing `StepClock` beat-ratio table.
-**Still open** (unchanged from below): whether glide time locks to tempo at
-all.
-
-An internal **master tempo** that the LFO rate and arp tempo — and, once
-built, the step sequencer — can each optionally lock to, with its own
-division/ratio so the rate scales proportionally to the master rather than
-every consumer being forced to the same number. Nothing like this exists
-today: each tempo-driven consumer (currently only the arpeggiator) owns an
-independent `StepClock` and reads its own raw BPM atomic; there's no shared
-clock.
+One shared `masterTempoBpm` atomic (not a per-consumer sync-enable +
+fallback) drives both the arpeggiator and the step sequencer, each still via
+its own `StepClock` instance and its own Division combo — only the BPM
+*source* is shared, not the clocks themselves. The LFO gains its own
+`lfoSyncEnabled`/`lfoSyncDivision` atomics and syncs to that same master
+tempo through the existing `StepClock` beat-ratio table
+(`beatsPerStepForDivision`) — no second table was needed. Free-run mode's
+Rate knob floor was independently widened (0.02 Hz → 0.005 Hz, ~200s cycle)
+so the LFO can sweep slower without that being tied to sync being on.
 
 **Not host sync.** [future-work.md](future-work.md)'s VST3-conversion item is
 about syncing to an *external* DAW clock, which CLAUDE.md rules out ("No
 host sync... internal tempo only"). A master tempo that only this app's own
 parameters lock to doesn't touch that constraint — internal stays internal.
 
-`StepClock`'s own doc comment already anticipates a second internal consumer
-once the step sequencer (item 7) exists ("the arpeggiator owns one, and item
-7's step sequencer will own another... this class is the piece those two
-SHARE") — that's the natural point a real shared master clock gets factored
-out, rather than before there are two real users. The LFO side is smaller:
-`Lfo::setRate` takes a raw Hz value today with no division/BPM concept, so
-syncing it needs a new Hz-from-BPM-and-division conversion, the same shape
-as `StepClock`'s own `beatsPerStepForDivision` table.
-
-Whether **glide time** locks to tempo too is explicitly undecided — it's a
-one-shot transition (seconds to glide one octave), not a periodic rate like
-the other three, and "glide takes one beat" is a different feature from
-"glide's seconds value scales with tempo." See TODO.md's parking-lot entry
-for this and the other open questions.
+**Still open**: whether **glide time** locks to tempo too is explicitly
+undecided — it's a one-shot transition (seconds to glide one octave), not a
+periodic rate like the other three, and "glide takes one beat" is a
+different feature from "glide's seconds value scales with tempo." Left for a
+future item; not part of tempo-sync-design.md's scope.
 
 ## UI
 

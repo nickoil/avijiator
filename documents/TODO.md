@@ -207,6 +207,26 @@ Build/validate everything here before touching Android.
       bug; resolved once every stray process was killed before testing. Not
       re-verified against a MIDI hardware or on a full `cdb.exe` pass since
       the octave-range/gate-odds edit.
+      **Regression found and fixed 2026-09-01**: the Division combo showed
+      NO selection after clicking Autoviji - found by the user, not by any
+      self-test (this button's own widget-sync line has never had one - see
+      `randomizeSequence`'s comment). Root cause: `randomizeSequence` set
+      `seqChoices[0].comboBox`'s selected id to
+      `(int) StepDivision::EighthTriplet + 1`, the TRUE global enum value -
+      correct before tempo-sync-design.md's follow-up work sliced seq's
+      Division combo (`seqChoiceSpecs`' own Division entry now sets
+      `firstChoiceValue = StepDivision::Whole`, so combo-local ids are offset
+      from the enum's true values). `EighthTriplet + 1` no longer matched any
+      real item in the sliced list, so JUCE quietly showed no selection -
+      no crash, no assertion, silent. `params.seqDivision` itself was never
+      wrong (stored the correct atomic value throughout) - purely a display
+      desync. Fixed by subtracting `seqChoiceSpecs[0].firstChoiceValue` back
+      off before the `+1`, mirroring `attachChoice`'s own seeding formula
+      (`ParameterControls.h`). Verified via build + `cdb.exe` (no assertion
+      hits, though this class of bug wouldn't have fired one anyway - it's a
+      display bug, not a crash); **not yet re-confirmed visually** that the
+      Division combo now shows "1/8T" after clicking Autoviji - that's the
+      user's own eyes to make.
 - [ ] **9. Settings Persistence** — Design + build order:
       [settings-persistence-design.md](settings-persistence-design.md).
       Save/reload all synth settings, including a preset system. nothing is persisted anywhere in this app today: `createStateXml`,
@@ -268,26 +288,87 @@ Build/validate everything here before touching Android.
 
 ### Tempo sync (not numbered — no reordering)
 
-- [ ] **Internal master tempo for LFO/arp/glide** — Design + build order:
-      [tempo-sync-design.md](tempo-sync-design.md). One shared `masterTempoBpm`
-      replaces `arpTempoBpm`/`seqTempoBpm`; arp and sequencer each keep their
-      own Division combo. LFO syncs to the master tempo via the existing
-      `StepClock` beat-ratio table (fractions of a beat, matching arp/seq);
-      the separate "LFO should sweep even slower" ask is a decoupled
-      free-run-floor widening, not folded into the sync ratios. Design
-      doc written 2026-08-29; build steps not yet started.
+- [x] **Internal master tempo for LFO/arp/glide** — Design + build order:
+      [tempo-sync-design.md](tempo-sync-design.md). Built 2026-08-30, all 5
+      build steps done. `VoiceParameters::masterTempoBpm` replaces
+      `arpTempoBpm`/`seqTempoBpm` (mechanical rename across
+      `Arpeggiator.cpp`/`StepSequencer.cpp` and their self-test rigs); arp
+      and sequencer each keep their own `StepClock` instance and Division
+      atomic — only the BPM *source* is shared. SEQUENCER's own Tempo knob
+      was removed (`numSeqKnobs` 2→1, no width-budget impact — that row
+      isn't budgeted). The Tempo knob itself first landed in ARP (repointed
+      to `masterTempoBpm`, label/position unchanged, flagged as the simplest
+      placement rather than an argued one), then moved to OUTPUT next to
+      Level on 2026-08-30 once the user judged ARP misleading for a
+      global-tempo knob (`numArpKnobs` 2→1, `numOutputKnobs` 1→2).
+      LFO gains `lfoSyncEnabled`/`lfoSyncDivision` atomics and a
+      `SynthVoice.cpp` computation (right at the existing `lfo.setRate` call
+      site) that reuses `StepClock.h`'s `beatsPerStepForDivision` table
+      as-is — no new Hz-from-BPM-and-division table needed. New Debug
+      self-test `runLfoTempoSyncSelfTest`: proves the sync-off path is
+      byte-identical to free-run regardless of tempo/division, and proves
+      two known BPM/division pairs (300 BPM/1-16 → 20 Hz; 240 BPM/1-8 →
+      8 Hz) land the LFO's own Square-wave half-period at the arithmetically
+      exact sample boundary, via a loud/quiet cutoff-driven amplitude
+      pattern (LFO → cutoff, wide depth, clamped by Vcf's own [20, 18000] Hz
+      range at both ends) rather than reaching into `Lfo`'s private phase.
+      Free-run mode's own, independent ask: `lfoKnobSpecs`' Rate floor
+      widened 0.02 → 0.005 Hz (~200s cycle) with a geometric-mean skew
+      (0.3162), matching Cutoff/Attack/Decay/Release's existing convention -
+      no self-test, knob-spec/layout only.
+      UI: LFO gained its first-ever toggle (Sync, a plain `ToggleButton` in
+      its own cell, not a stack) and a second combo (Sync Division, reusing
+      `arpDivisionChoices` as a third user of that shared table). Row B's
+      `designWidth` grew 1280→1456 (exactly the two new LFO cells' worth of
+      pixels) to avoid robbing KEYBOARD/ARP/OUTPUT; the Tempo move to OUTPUT
+      left row B's total unchanged (a knob cell moved sections, none added).
+      Row A's own `envRowWidthCompensation` was initially left unrebalanced
+      (flagged as a gap on row A's right), then fixed per the "line up the
+      panels" request: 28px → 204px, so row A once again totalled row B's
+      1416px.
+      **Second UI follow-up, same day**: OUTPUT moved off row B onto its own
+      row directly under ARP (`outputSection.setBounds` positioned at
+      `arpSection`'s own X, not routed through the row's left-to-right
+      `place` helper - it isn't sharing a row with anything). Row B dropped
+      back to 3 sections (LFO|KEYBOARD|ARP), and by coincidence its new
+      total cell count (13, across 3 sections) exactly matches row A's
+      (13, across 3 sections too) - `envRowWidthCompensation` went back to
+      0 (not deleted - one edit away if either row's count changes again).
+      `designWidth` shrank 1456→1252 (row B no longer needs OUTPUT's width);
+      `designHeight` grew 840→1004 (one new section row plus its gap).
+      **Third UI follow-up, 2026-08-31**: OUTPUT moved again, off its own row
+      onto SEQUENCER's existing row, immediately to SEQUENCER's right - back
+      through the ordinary `place` left-to-right helper, since it's sharing
+      a row again. SEQUENCER's row was never width-budgeted (natural width,
+      left-aligned - same as before OUTPUT joined it), so no width rebalance
+      needed; `designHeight` dropped back 1004→840 now that OUTPUT no longer
+      needs its own row. `designWidth` stayed at 1252 throughout this one -
+      SEQUENCER+OUTPUT's combined natural width is nowhere near the budget
+      row A/B set.
+      `static_assert` control-count totals updated: 7 combo boxes (was 6), 3
+      toggles (was 2) — the 19-knob total
+      is unchanged throughout (Tempo/OUTPUT moving sections doesn't change
+      it).
+      Builds clean (Debug + Release, zero warnings) at every step, including
+      all three UI follow-ups; verified via `cdb.exe` after each — no
+      assertion hits.
       **Was open, now settled** (see the design doc's intro for the
       reasoning):
       (a) settled — one shared dial (masterTempoBpm), not a per-consumer
       sync-enable + fallback;
       (c) settled — item 7 is done, so `StepClock`'s own "wait for a second
-      owner" condition is already satisfied; building now.
-      **Still open, deliberately:**
-      (b) does glide time meaningfully lock to tempo at all, given it's a
-      one-shot transition rather than a periodic rate — two different
-      features hide under that one idea ("glide takes 1 beat" vs. "glide's
-      seconds value scales with tempo") and neither is committed to yet;
-      left for a future item, out of the design doc's scope
+      owner" condition is already satisfied.
+      **Still open, deliberately** (moved to architecture.md's Tempo sync
+      section too): (b) does glide time meaningfully lock to tempo at all,
+      given it's a one-shot transition rather than a periodic rate — two
+      different features hide under that one idea ("glide takes 1 beat" vs.
+      "glide's seconds value scales with tempo") and neither is committed to
+      yet; left for a future item, out of the design doc's scope.
+      **Human-only, not yet done**: whether the synced LFO actually feels
+      locked to the beat by ear; whether the widened free-run floor is
+      usefully slower in practice; whether OUTPUT sitting next to SEQUENCER
+      reads well now that the panel is back to its pre-follow-up height. Not
+      yet tested against MIDI hardware.
 
 ### WAV output / recording (not numbered — no reordering)
 

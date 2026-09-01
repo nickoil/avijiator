@@ -51,7 +51,7 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
     // smoothed - identical reasoning to Arpeggiator::process's own tempo/
     // division read. Safe to call every block: an unchanged value does not
     // move the countdown (runStepClockSelfTest).
-    clock.setTempo ((double) parameters.seqTempoBpm.load (std::memory_order_relaxed),
+    clock.setTempo ((double) parameters.masterTempoBpm.load (std::memory_order_relaxed),
                      (StepDivision) parameters.seqDivision.load (std::memory_order_relaxed));
 
     const auto patternLength = parameters.seqPatternLength.load (std::memory_order_relaxed);
@@ -387,7 +387,7 @@ namespace
             // 300 BPM / 1/32 -> 400 samples/step at this sample rate, exactly
             // (16000 * 0.2 * 0.125) - chosen so test windows below are exact
             // sample counts, not rounded ones.
-            p.seqTempoBpm.store (300.0f);
+            p.masterTempoBpm.store (300.0f);
             p.seqDivision.store ((int) StepDivision::ThirtySecond);
             p.seqGateLength.store (0.5f);
             p.seqPatternLength.store (seqMaxSteps);
@@ -597,7 +597,7 @@ void runStepSequencerRenderSelfTest()
 
             // A slow step so its gate-off deadline (95% of a HUGE step) is
             // still far from elapsed when tempo drops mid-gate below.
-            rig.parameters().seqTempoBpm.store (20.0f);
+            rig.parameters().masterTempoBpm.store (20.0f);
             rig.parameters().seqDivision.store ((int) StepDivision::Quarter);
             rig.parameters().seqGateLength.store (0.95f);
 
@@ -614,7 +614,7 @@ void runStepSequencerRenderSelfTest()
             // clamped down to the new, much shorter step length
             // (StepClock::setTempo's documented usability valve) - so step
             // 1's boundary now arrives while step 0's gate is still open.
-            rig.parameters().seqTempoBpm.store (300.0f);
+            rig.parameters().masterTempoBpm.store (300.0f);
             rig.parameters().seqDivision.store ((int) StepDivision::ThirtySecond);
 
             // 400 samples to reach step 1's boundary, plus 50 more to capture
@@ -667,13 +667,13 @@ namespace
             p.outputLevel.store (0.5f);
             p.sawLevel.store (0.7f);
 
-            // Fast clocks for both the arp and the seq, same 300BPM/1-32
-            // rate as SequencerRenderRig and Arpeggiator.cpp's own rig - a
-            // step is a few blocks rather than a fraction of a second of
-            // rendering at every Debug launch.
-            p.arpTempoBpm.store (300.0f);
+            // Fast clock for both the arp and the seq, same 300BPM/1-32 rate
+            // as SequencerRenderRig and Arpeggiator.cpp's own rig - a step is
+            // a few blocks rather than a fraction of a second of rendering at
+            // every Debug launch. One shared dial now (tempo-sync-design.md),
+            // so a single store covers both.
+            p.masterTempoBpm.store (300.0f);
             p.arpDivision.store ((int) StepDivision::ThirtySecond);
-            p.seqTempoBpm.store (300.0f);
             p.seqDivision.store ((int) StepDivision::ThirtySecond);
             p.seqGateLength.store (0.5f);
             p.seqPatternLength.store (seqMaxSteps);
