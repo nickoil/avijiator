@@ -180,6 +180,11 @@ void Arpeggiator::process (SynthVoice& voice, HeldNotes liveNotes, float* output
 
     const auto pattern = arpPatternFromIndex (parameters.arpPattern.load (std::memory_order_relaxed));
 
+    // The global octave transpose (VoiceParameters::masterOctaveShift),
+    // applied to every arp note-on below - see documents/
+    // note-handling-design.md section 7's revision.
+    const auto octaveShift = (float) parameters.masterOctaveShift.load (std::memory_order_relaxed);
+
     // A FRACTION of the step rather than a time, so changing tempo does not
     // also change articulation.
     const auto gateFraction = juce::jlimit (minGateFraction, maxGateFraction,
@@ -296,7 +301,7 @@ void Arpeggiator::process (SynthVoice& voice, HeldNotes liveNotes, float* output
                 // Velocity travels with the note even though the voice does
                 // not route it anywhere yet - item 7's accent and
                 // character-and-vim.md B5 are the eventual consumers.
-                voice.noteOn (active[(size_t) index].pitchLog2Hz,
+                voice.noteOn (active[(size_t) index].pitchLog2Hz + octaveShift,
                                active[(size_t) index].velocity);
 
                 // Re-derived from the CURRENT step length, every step.

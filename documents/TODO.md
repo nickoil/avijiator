@@ -445,8 +445,8 @@ Build/validate everything here before touching Android.
       where `0` correctly means "no effect". Pitch is stored as `log2(Hz)`
       though, not a depth or a flag, so its zero-init isn't neutral - it's a
       real value, `2^0 = 1 Hz`, roughly five octaves below anything reachable
-      via the keyboard (`QwertyNoteInput::minOctaveShift = -2` floors out at
-      MIDI 24, ≈33 Hz). Found 2026-08-28 via a user bug report ("sequencer
+      via the keyboard (`VoiceParameters::minMasterOctaveShift = -2` floors
+      out at MIDI 24, ≈33 Hz). Found 2026-08-28 via a user bug report ("sequencer
       just clicks, keyboard plays a nice clear note") that took most of a
       session to trace: a step whose gate is switched on by a plain click in
       the grid (`SynthPanel.cpp`'s `StepCell::mouseUp`, which only ever
@@ -462,6 +462,17 @@ Build/validate everything here before touching Android.
       gate-on gesture snap pitch up to a default if it's still at the raw
       zero. Out of scope for whichever numbered item is active when this is
       picked up
+- [ ] **Octave transpose promoted to one shared, global control** — moved
+      from `QwertyNoteInput`-owned + `SynthPanel`-mirrored dual state to
+      `VoiceParameters::masterOctaveShift`, applied uniformly to QWERTY,
+      on-screen keyboard, MIDI hardware input, the arpeggiator, and the step
+      sequencer (previously keyboard-input-only — MIDI/arp/seq scope is a
+      deliberate widening, not a bug fix). Control moved from its standalone
+      placement next to the on-screen keyboard into the OUTPUT panel,
+      alongside Level/Tempo, and rebuilt as a detented rotary knob (matching
+      Level/Tempo's own look) rather than the two-button widget it started
+      as. See `documents/note-handling-design.md` section 7's revision for
+      the full design record.
 
 ## 2. Stage B — Android (port)
 

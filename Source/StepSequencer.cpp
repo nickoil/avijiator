@@ -65,6 +65,12 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
     // section 8.
     const auto recordArmed = parameters.seqRecordArmed.load (std::memory_order_relaxed) != 0;
 
+    // The global octave transpose (VoiceParameters::masterOctaveShift),
+    // applied at playback below - stepPitchLog2Hz itself stays untransposed,
+    // same as the arp's own held-note stack. See documents/
+    // note-handling-design.md section 7's revision.
+    const auto octaveShift = (float) parameters.masterOctaveShift.load (std::memory_order_relaxed);
+
     auto offset = 0;
 
     while (offset < numSamples)
@@ -133,7 +139,7 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
             {
                 const auto slide = parameters.stepSlide[index].load (std::memory_order_relaxed) != 0;
                 const auto accented = parameters.stepAccent[index].load (std::memory_order_relaxed) != 0;
-                const auto pitch = parameters.stepPitchLog2Hz[index].load (std::memory_order_relaxed);
+                const auto pitch = parameters.stepPitchLog2Hz[index].load (std::memory_order_relaxed) + octaveShift;
 
                 // THE TIE IDEA, reused verbatim from the arp
                 // (arpeggiator-design.md section 10): skipping the

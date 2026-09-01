@@ -67,18 +67,12 @@ public:
     // reach for that itself, so it only reports the click. Wired in step 6.
     std::function<void()> onAudioSettingsClicked;
 
-    // The on-screen Octave Up/Down buttons only report the click - the panel
-    // has no reason to reach for QwertyNoteInput itself, same as
-    // onAudioSettingsClicked above not reaching for the AudioDeviceManager.
-    // Wired in MainComponent, which owns QwertyNoteInput.
-    std::function<void()> onOctaveUpClicked;
-    std::function<void()> onOctaveDownClicked;
-
-    // Called by MainComponent whenever QwertyNoteInput's octave shift
-    // changes - by an Octave button click OR by comma/period - so the
-    // on-screen keyboard's notes and its readout stay in sync with whichever
-    // caused it. See octaveShift's member comment.
-    void setOctaveShift (int newShift);
+    // The OUTPUT panel's Octave knob drags VoiceParameters::masterOctaveShift
+    // directly - the shared, global octave transpose, same shift comma/
+    // period drive from QwertyNoteInput. Called by MainComponent whenever
+    // that shift changes via comma/period, so the knob's position stays in
+    // sync with whichever input caused it.
+    void refreshOctaveReadout();
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -401,31 +395,6 @@ private:
         void resized() override;
     };
 
-    // Octave Up/Down, to the left of the on-screen keyboard, plus a readout
-    // of the octave that base note C currently sits in (matches
-    // keyboardBaseNoteNumber's own C3 convention - see that constant). Only
-    // reports clicks upward via SynthPanel::onOctaveUpClicked/DownClicked;
-    // SynthPanel::setOctaveShift is what actually moves the readout, so a
-    // click and a comma/period press update it the exact same way.
-    struct OctaveControl final : public juce::Component
-    {
-        juce::TextButton upButton { "+" }, downButton { "-" };
-
-        // "." and "," under each button - the matching QWERTY shortcut.
-        // Duplicates QwertyNoteInput's octaveUpKeyCode/octaveDownKeyCode as
-        // plain display text rather than reaching into that private,
-        // platform-varying constant (0xBE/0xBC on Windows, see that header) -
-        // same trade-off PianoKeyboard's own `letter` captions already make
-        // against QwertyNoteInput's key map.
-        juce::Label upShortcut, downShortcut;
-
-        juce::Label readout;
-
-        OctaveControl();
-
-        void resized() override;
-    };
-
     //==========================================================================
     VoiceParameters& params;
     std::function<void (const NoteEvent&)> pushNoteEvent;
@@ -488,19 +457,12 @@ private:
     std::array<ChoiceCell, numArpChoices> arpChoices;
     std::array<KnobCell, numArpKnobs> arpKnobs;
 
-    // Tempo moved here from ARP, next to Level - masterTempoBpm reads
-    // globally (arp, sequencer, synced LFO), so OUTPUT's plain
-    // global-controls cluster reads truer than a section named for one of
-    // its three consumers. Cell order: Level, Tempo.
-    //
-    // Position has moved twice since, both user follow-ups after seeing the
-    // built panel: first off row B onto its own row directly under ARP
-    // (`outputSection.setBounds` at arpSection's own X, bypassing `place`),
-    // then onto SEQUENCER's row, immediately to its right, going back
-    // through `place` like every other row-A/row-B section - see that row's
-    // own comment in the .cpp. SEQUENCER's row is natural-width, not
-    // budgeted (same as row A/B's own note), so OUTPUT riding along adds no
-    // width-matching obligation the way row B's version once did.
+    // Tempo moved here from ARP - masterTempoBpm reads globally (arp,
+    // sequencer, synced LFO), so OUTPUT's plain global-controls cluster
+    // reads truer than a section named for one of its three consumers.
+    // Octave joins it for the same reason (documents/note-handling-design.md
+    // section 7's revision) - it now reaches Keys/Arp/Seq alike, not just
+    // the on-screen keyboard it used to sit next to.
     PanelSection outputSection { "OUTPUT" };
     std::array<KnobCell, numOutputKnobs> outputKnobs;
 
@@ -530,13 +492,18 @@ private:
     StepGrid stepGrid;
 
     PianoKeyboard pianoKeyboard;
-    OctaveControl octaveControl;
 
-    // Drives the on-screen keyboard's note numbers (keyboardBaseNoteNumber +
-    // octaveShift * 12 + semitoneOffset) - see setOctaveShift. NOT the source
-    // of truth: that's QwertyNoteInput's own octaveShift, which MainComponent
-    // mirrors in here after every change.
-    int octaveShift = 0;
+    // Lives in outputSection (addCell'd alongside Level/Tempo), not
+    // freestanding next to pianoKeyboard - documents/note-handling-design.md
+    // section 7's revision: a global "note output" transpose belongs with
+    // OUTPUT's other global controls, not next to one input source. A plain
+    // KnobCell, hand-wired in the constructor rather than through
+    // wireKnobs/KnobSpec - masterOctaveShift is an atomic<int> stepped over
+    // 7 whole-octave positions with a "C3"-style text readout, neither of
+    // which KnobSpec's float-continuous/numeric-suffix contract covers, same
+    // "doesn't fit the generic shape, hand-wire it" precedent as
+    // seqPatternLengthCombo/seqLaneCombo above.
+    KnobCell octaveKnob;
 
     juce::TextButton audioSettingsButton;
 

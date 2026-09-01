@@ -2,6 +2,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "DSP/VoiceParameters.h"
+
 //==============================================================================
 // Semitone offsets from the base note. Lower row starts at the base, upper
 // row an octave above it.
@@ -20,11 +22,6 @@ void QwertyNoteInput::emit (NoteEvent::Type type, std::uint8_t noteNumber, float
         onNoteEvent ({ type, noteNumber, pitchLog2HzForMidiNote (noteNumber), velocity });
 }
 
-void QwertyNoteInput::adjustOctaveShift (int delta) noexcept
-{
-    octaveShift = juce::jlimit (minOctaveShift, maxOctaveShift, octaveShift + delta);
-}
-
 void QwertyNoteInput::pollKeyStates()
 {
     // Octave shift first, on the RISING edge only - it's an action, not a
@@ -37,10 +34,10 @@ void QwertyNoteInput::pollKeyStates()
     const auto octaveUpNow = juce::KeyPress::isKeyCurrentlyDown (octaveUpKeyCode);
 
     if (octaveDownNow && ! octaveDownWasHeld)
-        adjustOctaveShift (-1);
+        adjustMasterOctaveShift (parameters, -1);
 
     if (octaveUpNow && ! octaveUpWasHeld)
-        adjustOctaveShift (1);
+        adjustMasterOctaveShift (parameters, 1);
 
     octaveDownWasHeld = octaveDownNow;
     octaveUpWasHeld = octaveUpNow;
@@ -59,7 +56,7 @@ void QwertyNoteInput::pollKeyStates()
         if (isDownNow)
         {
             const auto noteNumber = juce::jlimit (0, 127,
-                                                   baseNoteNumber + octaveShift * 12 + mapping.semitoneOffset);
+                                                   baseNoteNumber + mapping.semitoneOffset);
 
             state.emittedNoteNumber = (std::uint8_t) noteNumber;
 
@@ -88,8 +85,6 @@ void QwertyNoteInput::releaseAllHeldKeys()
         state.isHeld = false;
     }
 
-    // Not cleared: octaveShift, which is a setting rather than a held state
-    // and should survive the window losing focus.
     octaveDownWasHeld = false;
     octaveUpWasHeld = false;
 }

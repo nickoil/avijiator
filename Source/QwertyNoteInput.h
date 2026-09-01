@@ -6,6 +6,8 @@
 
 #include "DSP/NoteEvent.h"
 
+struct VoiceParameters;
+
 //==============================================================================
 /*
     Plays notes from the computer keyboard, tracker-style: two rows of keys
@@ -15,6 +17,15 @@
         Q 2 W 3 E R 5 T 6 Y 7 U   =  the same, one octave higher
 
         , = octave down        . = octave up
+
+    The octave shift itself lives in VoiceParameters::masterOctaveShift, not
+    here - it's a global "note output" transpose shared with the on-screen
+    keyboard, MIDI input, the arp and the sequencer (documents/
+    note-handling-design.md section 7's revision), not a QWERTY-only quirk.
+    This class only detects the comma/period keys and forwards to that shared
+    atomic via adjustMasterOctaveShift; it emits raw, untransposed note
+    numbers - the transpose is applied once, downstream, at the point each
+    note source's final pitch reaches the voice.
 
     Deliberately NOT Z/X for the octave shift, even though that pairing is
     common elsewhere - both are note keys in this layout.
@@ -38,7 +49,7 @@
 class QwertyNoteInput
 {
 public:
-    QwertyNoteInput() = default;
+    explicit QwertyNoteInput (VoiceParameters& parameters) noexcept : parameters (parameters) {}
 
     // Emits into NoteRouter's UI FIFO. Called on the message thread only.
     std::function<void (const NoteEvent&)> onNoteEvent;
@@ -51,16 +62,6 @@ public:
     // focus: no further key callbacks arrive, so without this a note held at
     // that moment would stick on forever.
     void releaseAllHeldKeys();
-
-    int getOctaveShift() const noexcept { return octaveShift; }
-
-    // Same clamped +/-1 adjustment the , and . keys make each poll, exposed
-    // so SynthPanel's on-screen Octave Up/Down buttons drive this ONE piece
-    // of state rather than keeping an unsynchronised copy of their own - the
-    // on-screen keyboard's letter captions promise "same note as this QWERTY
-    // key," which only stays true if both share one shift.
-    void octaveUp() noexcept { adjustOctaveShift (1); }
-    void octaveDown() noexcept { adjustOctaveShift (-1); }
 
 private:
     struct KeyMapping
@@ -84,10 +85,9 @@ private:
     static const KeyMapping keyMap[numMappedKeys];
 
     // Z is C3. Shift is clamped so the highest mapped key stays inside MIDI's
-    // 0..127 range.
+    // 0..127 range - see VoiceParameters::minMasterOctaveShift/
+    // maxMasterOctaveShift.
     static constexpr int baseNoteNumber = 48;
-    static constexpr int minOctaveShift = -2;
-    static constexpr int maxOctaveShift = 4;
 
    #if JUCE_WINDOWS
     // VK_OEM_COMMA / VK_OEM_PERIOD - see the WINDOWS VK QUIRK note above.
@@ -99,10 +99,9 @@ private:
    #endif
 
     void emit (NoteEvent::Type type, std::uint8_t noteNumber, float velocity);
-    void adjustOctaveShift (int delta) noexcept;
 
+    VoiceParameters& parameters;
     std::array<KeyState, numMappedKeys> keyStates {};
     bool octaveDownWasHeld = false;
     bool octaveUpWasHeld = false;
-    int octaveShift = 0;
 };

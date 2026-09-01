@@ -94,10 +94,9 @@ namespace
     constexpr int maxStepMidiNote = 108; // C8
 
     // "C3" for MIDI 48, matching SynthPanel::keyboardBaseNoteNumber's own
-    // octave anchor exactly (setOctaveShift uses the identical convention) -
-    // duplicated as a literal rather than reaching into that private
-    // constant, same trade-off OctaveControl's shortcut labels already make
-    // against QwertyNoteInput's key codes (see that struct's comment).
+    // octave anchor exactly (the OUTPUT panel's Octave knob uses the
+    // identical convention - see its textFromValueFunction) - duplicated as
+    // a literal rather than reaching into that private constant.
     juce::String noteNameForMidiNote (int midiNoteNumber) noexcept
     {
         static const char* const names[12] =
@@ -677,46 +676,6 @@ void SynthPanel::PianoKeyboard::resized()
 }
 
 //==============================================================================
-SynthPanel::OctaveControl::OctaveControl()
-{
-    upButton.setWantsKeyboardFocus (false);
-    downButton.setWantsKeyboardFocus (false);
-
-    readout.setJustificationType (juce::Justification::centred);
-    readout.setColour (juce::Label::textColourId, PanelLookAndFeel::textDim);
-    readout.setFont (PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 13.0f));
-
-    for (auto* shortcut : { &upShortcut, &downShortcut })
-    {
-        shortcut->setJustificationType (juce::Justification::centred);
-        shortcut->setColour (juce::Label::textColourId, PanelLookAndFeel::textDim);
-        shortcut->setFont (PanelLookAndFeel::fontFor (PanelLookAndFeel::regularTypeface(), 11.0f));
-        addAndMakeVisible (*shortcut);
-    }
-    upShortcut.setText (".", juce::dontSendNotification);
-    downShortcut.setText (",", juce::dontSendNotification);
-
-    addAndMakeVisible (upButton);
-    addAndMakeVisible (readout);
-    addAndMakeVisible (downButton);
-}
-
-void SynthPanel::OctaveControl::resized()
-{
-    constexpr int buttonHeight = 26;
-    constexpr int shortcutHeight = 14;
-
-    auto area = getLocalBounds();
-    upButton.setBounds (area.removeFromTop (buttonHeight));
-    upShortcut.setBounds (area.removeFromTop (shortcutHeight));
-
-    downShortcut.setBounds (area.removeFromBottom (shortcutHeight));
-    downButton.setBounds (area.removeFromBottom (buttonHeight));
-
-    readout.setBounds (area);
-}
-
-//==============================================================================
 // AVIJI<em>A</em>TOR - documents/ui-mockup's header markup, verbatim: the
 // second A is the only accent-coloured glyph, everything else is the
 // ordinary text colour. One AttributedString, not three Labels - see the
@@ -812,7 +771,71 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
     wireChoices (arpChoices, arpChoiceSpecs, numArpChoices, arpSection);
     wireKnobs (arpKnobs, arpKnobSpecs, numArpKnobs, arpSection);
 
-    wireKnobs (outputKnobs, outputKnobSpecs, numOutputKnobs, outputSection);
+    // outputKnobSpecs index 1 is Tempo - attached directly rather than
+    // through wireKnobs, since Octave's hand-wiring below needs to land
+    // between Tempo and Level.
+    attachKnob (outputKnobs[1].slider, outputKnobs[1].label, outputKnobSpecs[1], params);
+    outputSection.addCell (outputKnobs[1].label, outputKnobs[1].slider);
+
+    // Octave joins Level/Tempo as OUTPUT's third global control - see
+    // outputSection's own comment in SynthPanel.h. Not a plain wireKnobs/
+    // KnobSpec cell like its neighbours: masterOctaveShift is an atomic<int>,
+    // stepped over 7 whole-octave positions with a signed-integer readout
+    // rather than a numeric suffix, neither of which KnobSpec's
+    // float-continuous contract covers - hand-wired instead, same precedent
+    // as seqPatternLengthCombo/seqLaneCombo below.
+    octaveKnob.label.setText ("OCTAVE", juce::dontSendNotification);
+    octaveKnob.label.setJustificationType (juce::Justification::centred);
+    octaveKnob.label.setFont (PanelLookAndFeel::captionFont());
+
+    octaveKnob.slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+
+    // Read-only text box: there's no sane inverse for "C3" back to a value,
+    // so typing is simply not offered - drag-only, same as any other
+    // detented hardware control. Otherwise identical geometry to attachKnob's
+    // own text box.
+    octaveKnob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 70, 16);
+
+    // Interval 1.0 is what makes the drag DETENTED - it snaps to whole
+    // octaves rather than gliding continuously, matching a real hardware
+    // octave switch's feel despite RotaryHorizontalVerticalDrag being the
+    // same continuous-drag style every other knob here uses.
+    octaveKnob.slider.setRange (VoiceParameters::minMasterOctaveShift,
+                                 VoiceParameters::maxMasterOctaveShift, 1.0);
+    octaveKnob.slider.setWantsKeyboardFocus (false);
+
+    // Signed integer, not "C3"-style absolute note naming - for a TRANSPOSE
+    // control, "+1"/"-2" reads as "how far from normal" at a glance, which is
+    // the thing actually being dialled in; a note name makes the player do
+    // that subtraction themselves.
+    octaveKnob.slider.textFromValueFunction = [] (double value)
+    {
+        const auto shift = (int) std::round (value);
+        return shift > 0 ? "+" + juce::String (shift) : juce::String (shift);
+    };
+
+    octaveKnob.slider.onValueChange = [this]
+    {
+        params.masterOctaveShift.store ((int) std::round (octaveKnob.slider.getValue()),
+                                         std::memory_order_relaxed);
+    };
+
+    refreshOctaveReadout(); // seed: the knob and the atomic cannot disagree at startup
+
+    // setValue(0, ...) above is a no-op when the slider's own starting value
+    // is ALREADY 0 - juce::Slider skips updateText() when the value doesn't
+    // change, so the text box would otherwise be left showing its raw
+    // pre-textFromValueFunction default rather than "0", not because the
+    // formatting is wrong but because it was never asked to run. Forced
+    // unconditionally rather than relying on refreshOctaveReadout to always
+    // change something.
+    octaveKnob.slider.updateText();
+
+    outputSection.addCell (octaveKnob.label, octaveKnob.slider);
+
+    // outputKnobSpecs index 0 is Level.
+    attachKnob (outputKnobs[0].slider, outputKnobs[0].label, outputKnobSpecs[0], params);
+    outputSection.addCell (outputKnobs[0].label, outputKnobs[0].slider);
 
     // Item 7 build steps 6-7. Cell order: On+Record, Division, Pattern
     // Length, Tempo, Gate, Lane - see the member comment in SynthPanel.h.
@@ -893,7 +916,7 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
             // emittedNoteNumber comment on PianoKey in the header.
             if (isDown)
                 key.emittedNoteNumber = (std::uint8_t) juce::jlimit (0, 127,
-                    keyboardBaseNoteNumber + octaveShift * 12 + spec.semitoneOffset);
+                    keyboardBaseNoteNumber + spec.semitoneOffset);
 
             pushNoteEvent ({ isDown ? NoteEvent::Type::NoteOn : NoteEvent::Type::NoteOff,
                               key.emittedNoteNumber,
@@ -906,19 +929,6 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
     }
 
     addAndMakeVisible (pianoKeyboard);
-
-    octaveControl.upButton.onClick = [this]
-    {
-        if (onOctaveUpClicked != nullptr)
-            onOctaveUpClicked();
-    };
-    octaveControl.downButton.onClick = [this]
-    {
-        if (onOctaveDownClicked != nullptr)
-            onOctaveDownClicked();
-    };
-    addAndMakeVisible (octaveControl);
-    setOctaveShift (0); // matches QwertyNoteInput's own starting shift
 
     audioSettingsButton.setButtonText ("Audio Settings");
     audioSettingsButton.setWantsKeyboardFocus (false);
@@ -945,13 +955,15 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
     setSize (designWidth, designHeight);
 }
 
-void SynthPanel::setOctaveShift (int newShift)
+void SynthPanel::refreshOctaveReadout()
 {
-    octaveShift = newShift;
-
-    // keyboardBaseNoteNumber (MIDI 48) is C3 - see that constant's comment -
-    // so the readout is just "3 + shift".
-    octaveControl.readout.setText ("C" + juce::String (3 + octaveShift), juce::dontSendNotification);
+    // dontSendNotification: this only PULLS the atomic's current value into
+    // the knob's position (and, via textFromValueFunction, its text box) -
+    // it must never fire onValueChange and write the same value straight
+    // back, which would be harmless here but is the wrong shape to establish
+    // for a UI -> atomic -> UI refresh path.
+    octaveKnob.slider.setValue (params.masterOctaveShift.load (std::memory_order_relaxed),
+                                 juce::dontSendNotification);
 }
 
 SynthPanel::~SynthPanel()
@@ -1156,7 +1168,7 @@ void SynthPanel::resized()
         // and Lane cells - neither is a ChoiceSpec, see numSeqChoices' own
         // comment in SynthPanel.h.
         place (row, seqControlSection, 1 + numSeqChoices + numSeqKnobs + 2);
-        place (row, outputSection, numOutputKnobs);
+        place (row, outputSection, numOutputKnobs + 1); // +1 = the Octave cell
     }
     area.removeFromTop (gap);
 
@@ -1166,14 +1178,11 @@ void SynthPanel::resized()
     // PianoKeyboard lays out its own keys and letter row internally - see
     // PianoKeyboard::resized(). Audio Settings lives in the header, top-right
     // - see above; the latching note buttons are gone (removed entirely).
-    // OctaveControl sits to the left of it, same row height, its own width
-    // carved off before the keyboard claims the rest.
+    // The Octave knob no longer sits here - it moved into outputSection, see
+    // octaveKnob's own comment in SynthPanel.h - so the keyboard now claims
+    // the whole row.
     {
-        constexpr int octaveControlWidth = 64;
-
         auto keyboardRow = area.removeFromTop (keyboardRowHeight);
-        octaveControl.setBounds (keyboardRow.removeFromLeft (octaveControlWidth));
-        keyboardRow.removeFromLeft (gap);
         pianoKeyboard.setBounds (keyboardRow);
     }
 }

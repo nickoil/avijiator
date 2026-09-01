@@ -1,6 +1,7 @@
 #include "NoteRouter.h"
 
 #include "DSP/SynthVoice.h"
+#include "DSP/VoiceParameters.h"
 
 void NoteRouter::reset() noexcept
 {
@@ -35,9 +36,15 @@ void NoteRouter::retakeVoice (SynthVoice& voice, NotePriorityMode priorityMode) 
         return;
     }
 
+    // The stack holds raw, untransposed pitch - the global octave transpose
+    // (VoiceParameters::masterOctaveShift) is applied here, fresh, rather
+    // than baked into the note at press time. See documents/
+    // note-handling-design.md section 7's revision.
+    const auto octaveShift = (float) voice.getParameters().masterOctaveShift.load (std::memory_order_relaxed);
+
     // noteOn, not retargetPitch: the voice is silent by the hand-over
     // invariant, so this is a fresh trigger and must pluck.
-    voice.noteOn (resolution.pitchLog2Hz, resolution.velocity);
+    voice.noteOn (resolution.pitchLog2Hz + octaveShift, resolution.velocity);
     voiceIsSounding = true;
     soundingNoteNumber = resolution.noteNumber;
 }
@@ -67,6 +74,13 @@ void NoteRouter::apply (const NoteEvent& event, SynthVoice& voice, NotePriorityM
     // time.
     const auto driveVoice = drive == VoiceDrive::Direct;
 
+    // Covers QWERTY, the on-screen keyboard AND MIDI hardware in one place -
+    // dispatchPendingEvents drains both event FIFOs through this same apply().
+    // The stack itself holds raw, untransposed pitch; the global transpose is
+    // applied here, fresh, rather than baked into the event at its source.
+    // See documents/note-handling-design.md section 7's revision.
+    const auto octaveShift = (float) voice.getParameters().masterOctaveShift.load (std::memory_order_relaxed);
+
     if (event.type == NoteEvent::Type::NoteOn)
     {
         const auto resolution = noteStack.noteOn (event.noteNumber, event.pitchLog2Hz,
@@ -84,7 +98,7 @@ void NoteRouter::apply (const NoteEvent& event, SynthVoice& voice, NotePriorityM
         // envelope thump. (In LastNote mode a new press always wins, so this
         // only ever bites in HighestNote.)
         if (! voiceIsSounding || resolution.noteNumber != soundingNoteNumber)
-            voice.noteOn (resolution.pitchLog2Hz, resolution.velocity);
+            voice.noteOn (resolution.pitchLog2Hz + octaveShift, resolution.velocity);
 
         voiceIsSounding = true;
         soundingNoteNumber = resolution.noteNumber;
@@ -103,7 +117,7 @@ void NoteRouter::apply (const NoteEvent& event, SynthVoice& voice, NotePriorityM
             // reason that method exists: nothing was newly PRESSED here, so
             // this must never retrigger, in either legato mode.
             if (resolution.noteNumber != soundingNoteNumber)
-                voice.retargetPitch (resolution.pitchLog2Hz);
+                voice.retargetPitch (resolution.pitchLog2Hz + octaveShift);
 
             soundingNoteNumber = resolution.noteNumber;
         }

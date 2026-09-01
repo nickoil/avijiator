@@ -90,10 +90,16 @@ namespace
 }
 
 MainComponent::MainComponent()
+    // qwertyInput takes voice.getParameters() by reference, same reasoning
+    // as panel below - both need VoiceParameters::masterOctaveShift, the
+    // shared global octave transpose (documents/note-handling-design.md
+    // section 7's revision).
+    //
     // pushNoteEvent closes over router, which must already be constructed -
     // see the member comment in MainComponent.h. It is only ever CALLED
     // later, from the message thread, never during construction.
-    : panel (voice.getParameters(), [this] (const NoteEvent& event) { router.pushUiEvent (event); })
+    : qwertyInput (voice.getParameters())
+    , panel (voice.getParameters(), [this] (const NoteEvent& event) { router.pushUiEvent (event); })
 {
    #if JUCE_DEBUG
     // All three of these fail SILENTLY when wrong - a dropped note event, a
@@ -179,21 +185,6 @@ MainComponent::MainComponent()
 
     panel.onAudioSettingsClicked = [this] { showAudioSettings(); };
 
-    // Octave buttons drive QwertyNoteInput's own shift (comma/period's exact
-    // same clamped adjustment) and then mirror the result back into the
-    // panel, the same way keyStateChanged does below for comma/period - see
-    // SynthPanel::onOctaveUpClicked's comment.
-    panel.onOctaveUpClicked = [this]
-    {
-        qwertyInput.octaveUp();
-        panel.setOctaveShift (qwertyInput.getOctaveShift());
-    };
-    panel.onOctaveDownClicked = [this]
-    {
-        qwertyInput.octaveDown();
-        panel.setOctaveShift (qwertyInput.getOctaveShift());
-    };
-
     addAndMakeVisible (panel);
 
     // The component itself takes keyboard focus so QWERTY note input works
@@ -277,10 +268,10 @@ bool MainComponent::keyStateChanged (bool /*isKeyDown*/)
 {
     qwertyInput.pollKeyStates();
 
-    // Mirrors the shift into the panel so a comma/period press moves the
-    // on-screen keyboard and its readout exactly as an Octave button click
-    // would - see SynthPanel::onOctaveUpClicked's comment.
-    panel.setOctaveShift (qwertyInput.getOctaveShift());
+    // Refreshes the OUTPUT panel's readout so a comma/period press moves it
+    // exactly as an Octave button click would - both drive the same shared
+    // VoiceParameters::masterOctaveShift atomic now.
+    panel.refreshOctaveReadout();
 
     // Not consumed: this only observes key state, so anything else that wants
     // these keys should still get them.

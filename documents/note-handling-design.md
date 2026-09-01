@@ -463,6 +463,82 @@ comma/period make) and `MainComponent` mirrors the result back with
 `SynthPanel::setOctaveShift()`, so a button click and a comma/period press
 move the same one shift.
 
+**Update, later revision: octave promoted to one shared, global "note output"
+transpose.** The scheme above shifted notes at *generation* time, and only
+for keyboard-originated ones — `QwertyNoteInput` baked the shift into the
+MIDI note number it computed for QWERTY presses, `SynthPanel`'s on-screen
+keyboard duplicated that arithmetic against its own mirrored (explicitly
+not-source-of-truth) copy, and MIDI hardware input, the arpeggiator, and the
+step sequencer never saw the shift at all.
+
+Following the exact shape of decision `tempo-sync-design.md` made for
+`masterTempoBpm` — one shared dial, not a per-consumer copy — the shift is
+now `VoiceParameters::masterOctaveShift`, one atomic. `QwertyNoteInput`'s
+comma/period handling calls `adjustMasterOctaveShift()` to move it rather
+than owning any state of its own, and `QwertyNoteInput`/the on-screen
+keyboard now emit raw, untransposed note numbers.
+
+The transpose itself moved downstream, to the point each of the three note
+sources hands its final pitch to `SynthVoice`:
+
+- **Keys** (QWERTY, on-screen keyboard, **and MIDI hardware input** — a
+  deliberate scope widening, not an oversight): `NoteRouter::apply()` and
+  `NoteRouter::retakeVoice()` add the shift to `resolution.pitchLog2Hz`
+  before calling `voice.noteOn`/`retargetPitch`. Both MIDI and UI note
+  events drain through the same `apply()`, so this one change point covers
+  all three keyboard-shaped sources at once — no change needed to
+  `MainComponent`'s MIDI handling.
+- **Arp**: `Arpeggiator::process()` adds the shift to the pitch it passes to
+  `voice.noteOn`.
+- **Seq**: `StepSequencer::process()` adds the shift where it reads back a
+  step's stored pitch for playback. The *recorded* pitch itself
+  (`stepPitchLog2Hz`) stays untransposed, sourced straight from `NoteStack` —
+  so a recorded step picks up whatever the current transpose is at playback
+  time, same as a hand-entered one.
+
+Because the transpose is applied fresh at each of these call sites rather
+than stored per held note, two behaviors fall out with no special-casing,
+and are the settled, by-design result rather than something to fix later:
+
+- A note already sustaining does not re-pitch the instant the control is
+  touched — it picks up the new shift on the *next* voice call for it (next
+  key transition for Keys, next step for Arp/Seq).
+- A fallback retarget (releasing a top note reveals a lower held one) uses
+  the shift in effect *at the moment of the fallback*, not the one in effect
+  when that note was originally pressed.
+
+The Octave control itself also moved, from its old freestanding spot next to
+the on-screen keyboard into the OUTPUT panel section, alongside Level and
+Tempo — the same "global control, not owned by one input source" reasoning
+`tempo-sync-design.md` used to relocate Tempo out of ARP.
+
+**Update, follow-up visual pass:** the relocated control's first cut was a
+literal port of the old widget - two `TextButton`s and a text readout,
+just stacked into a narrower `PanelSection` cell than the freestanding
+space it used to have. Cramped and visually inconsistent with OUTPUT's
+other two controls (both plain rotary knobs), so it was rebuilt as a
+`KnobCell` - a detented rotary slider (`setRange`'s third argument, the
+interval, forces whole-octave steps rather than a continuous drag) with a
+read-only text box showing a signed integer ("+1", "-2", "0") via `Slider::
+textFromValueFunction` - a transpose control reads as "how far from normal"
+more directly than an absolute note name would - matching Level/Tempo's
+look exactly. `Slider::updateText()` is called once explicitly after
+seeding, since `setValue` skips `updateText()` when the value doesn't
+actually change (true at startup, when the slider's own default already
+equals `masterOctaveShift`'s default of 0) - without it the text box would
+show its raw pre-`textFromValueFunction` default until the first drag.
+Hand-wired
+directly in `SynthPanel`'s constructor rather than through the generic
+`KnobSpec`/`attachKnob`/`wireKnobs` path every other knob in the panel goes
+through - `masterOctaveShift` is an `atomic<int>`, not the `atomic<float>`
+that mechanism's `KnobSpec::target` requires, and its readout is a lookup
+("C3") rather than a numeric value plus suffix. Same "doesn't fit the
+generic shape, hand-wire it" precedent `seqPatternLengthCombo`/
+`seqLaneCombo` already set. Comma/period still work exactly as before -
+they drive the same shared atomic, and `MainComponent::keyStateChanged`'s
+call to `SynthPanel::refreshOctaveReadout()` now moves the knob's position
+(via `Slider::setValue`) instead of a label's text.
+
 ---
 
 ## 8. `VoiceParameters` additions

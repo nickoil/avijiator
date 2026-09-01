@@ -208,6 +208,19 @@ struct VoiceParameters
     std::atomic<float> masterTempoBpm { 120.0f };
 
     //==============================================================================
+    // One shared octave transpose, applied uniformly to every note source
+    // (Keys - QWERTY/on-screen/MIDI - Arp, Seq), read once per note-on/
+    // retarget/step by each. Replaces the old scheme where QwertyNoteInput
+    // owned this and SynthPanel kept an explicitly-not-source-of-truth
+    // mirror (documents/note-handling-design.md section 7's revision).
+    // Discrete, whole-octave steps - not smoothed, same treatment as
+    // notePriorityMode above. See adjustMasterOctaveShift below, which is
+    // what comma/period and the OUTPUT panel's Octave buttons both call.
+    static constexpr int minMasterOctaveShift = -2;
+    static constexpr int maxMasterOctaveShift = 4;
+    std::atomic<int> masterOctaveShift { 0 };
+
+    //==============================================================================
     // Item 5 (arpeggiator).
     //
     // Strictly NOT voice parameters - the arp is a peer class owned by
@@ -376,3 +389,18 @@ struct VoiceParameters
     static_assert (std::atomic<int>::is_always_lock_free,
                    "Same requirement as the float parameters above.");
 };
+
+// Message-thread only (comma/period's poll, Octave Up/Down clicks) - never
+// called from the audio thread, so a plain load-then-store is safe: there is
+// exactly one writer thread. Shared by QwertyNoteInput and SynthPanel so a
+// key press and a button click move the exact same value the exact same way.
+inline void adjustMasterOctaveShift (VoiceParameters& params, int delta) noexcept
+{
+    const auto next = params.masterOctaveShift.load (std::memory_order_relaxed) + delta;
+
+    params.masterOctaveShift.store (
+        next < VoiceParameters::minMasterOctaveShift ? VoiceParameters::minMasterOctaveShift
+      : next > VoiceParameters::maxMasterOctaveShift ? VoiceParameters::maxMasterOctaveShift
+      : next,
+        std::memory_order_relaxed);
+}
