@@ -210,3 +210,158 @@ already scoped.
 - Some of these are deliberately *below conscious perception* individually
   (A3, A5, B3, B4's noise floor). Evaluate them by toggling during sustained
   playing, not by soloing them.
+
+---
+
+## V1 build scope — settled (session of 2026-09-03)
+
+The full spec above is ~19 cells of controls (5 toggles, 14 knobs/choices).
+Checked against `PanelSection::widthForCells` and the existing SEQUENCER/
+OUTPUT row's actual layout (`SynthPanel.cpp`'s `resized()`): that row uses
+744 of its 1212px budget today (SEQUENCER 452 + gap 16 + OUTPUT 276), leaving
+468px slack. A third section slotted between them costs one more 16px gap,
+so its own budget is 436px ≈ **4 cells, max**, before `designWidth` would
+need to grow — a real constraint, not a rough guess.
+
+**User's call: a curated v1 that fits in that slack, zero canvas growth.**
+Cut to the doc's own top 3 priority items (A1, A2, B1, B2 - implementation
+priority list above, items 1-4) plus the pairing trick ARP/SEQ's own On/Hold
+and On/Record cells already establish:
+
+| Cell | Contents | Priority items covered |
+|---|---|---|
+| 1 (ToggleStack) | VIM (top), Chorus On (bottom) | Tier 1 gate; B1 |
+| 2 (knob) | Drive | A1 |
+| 3 (knob) | Humanise | B2 |
+
+**3 cells (264px), not 4** - leaves 172px of the row's slack still spare for
+a later Tier-2 addition (Chorus Rate/Depth, Randomise) without redoing this
+layout math. New `PanelSection characterSection { "CHARACTER" }`, matching
+the existing all-caps section-title convention, inserted between
+`seqControlSection` and `outputSection` in `resized()`'s row-C block (and
+in the constructor's own section-visibility loop).
+
+**Deliberate scope cuts from the full spec, to fit 3 cells - revisit later,
+not forgotten:**
+
+- **Drive is knob-only, no separate toggle** - `filterDriveAmount`
+  defaulting to 0 (inert) is the same "0 = no effect" convention every other
+  depth knob in `VoiceParameters` already uses (`envToCutoffDepthOctaves`,
+  `lfoToPitchDepthOctaves`, ...), not a new pattern. Deviates from Tier 2's
+  general "each gets its own toggle" line in favour of matching this
+  codebase's existing convention.
+- **Chorus ships with fixed internal rate/depth, no exposed knobs yet** -
+  just the on/off toggle. B1's own Rate/Depth knobs are deferred; add them
+  to the section later (172px of spare slack already budgeted for exactly
+  this) once a fixed default has been lived with.
+- **Humanise is ONE knob, not three** - B2 lists Swing, Timing Jitter, and
+  Velocity Jitter as separate amounts; v1 combines them behind a single
+  `humaniseAmount` (0-1) that scales all three by fixed internal ratios
+  (implementation's own call exactly which ratios - not fixed here). 0 =
+  fully quantised (today's exact behaviour, unchanged). Splitting back into
+  3 knobs later just needs 2 more cells, well inside the remaining slack.
+- **A2 (exponential envelope curves) rides on the VIM toggle as originally
+  spec'd** - no separate control, no separate cell; `vimEnabled` gates it
+  directly in the ADSR's curve shaping.
+- **Everything else deferred entirely, not gated by anything built here**:
+  noise floor, output saturation, asymmetric clipping, oscillator drift, A5/
+  A6 (component-bleed, curved response), per-note randomisation (B3), mod
+  wheel/aftertouch routing (B5 - no MIDI CC/aftertouch plumbing exists yet),
+  the two already-built-but-unexposed velocity knobs
+  (`velocityToAmpDepth`/`velocityToCutoffDepthOctaves`), and FM/ring-mod
+  (B6, lowest priority, explicitly non-authentic). None of these are gated
+  by `vimEnabled` yet even where the full spec says they should be
+  eventually - `vimEnabled` only drives A2 for now, so the switch does
+  exactly what it visibly does, nothing latent.
+
+**New DSP touch points for v1** (Sonnet-level per this doc's own model
+note above - not item 2/5's DSP invention, but real signal-path code,
+so build and verify each in isolation before wiring the panel):
+
+- `Source/DSP/Vcf.cpp` - a `tanh()` (or equivalent) soft clip INSIDE the
+  resonance feedback loop (A1's own placement note: not on the output),
+  scaled by `filterDriveAmount`. At 0, must be byte-identical to today's
+  output - same "inert at default" proof every additive modulation term in
+  this codebase already carries.
+- `Source/DSP/Adsr.cpp` - exponential decay/release curve shaping, gated by
+  `vimEnabled`. Off must be byte-identical to today's linear ramps.
+- `Source/Arpeggiator.cpp` / `Source/StepSequencer.cpp` - swing + timing
+  jitter + velocity jitter derived from one `humaniseAmount` atomic, applied
+  wherever each already computes a step's timing/velocity. 0 must be
+  byte-identical to today (already sample-accurate, unswung, unjittered).
+- New `Source/DSP/Chorus.h/.cpp` - a small multi-tap modulated-delay block
+  at the output stage, gated by `chorusEnabled`, fixed internal rate/depth
+  constants for v1 (see the scope-cut above).
+- `Source/DSP/VoiceParameters.h` - new atomics: `vimEnabled` (int),
+  `filterDriveAmount` (float, 0 default), `humaniseAmount` (float, 0
+  default), `chorusEnabled` (int, 0 default). All four get picked up by
+  `SynthPanel::forEachSerializableParameter` automatically once given
+  `KnobSpec`/`ToggleSpec` entries - no separate preset-serializer change
+  needed (documents/settings-persistence-design.md section 4's whole point).
+
+**Next session prompt**: `Build Character & Vim v1 from documents/character-and-vim.md`.
+
+---
+
+## V1 build record (session of 2026-09-03)
+
+Built as scoped above. New/changed files:
+
+- `Source/DSP/VoiceParameters.h` — four new atomics: `vimEnabled`,
+  `filterDriveAmount`, `humaniseAmount`, `chorusEnabled`.
+- `Source/DSP/Vcf.h/.cpp` — `driveSaturate(x, driveAmount)` pushes the
+  *existing* feedback-loop `softClip` harder via a caller-supplied gain, then
+  divides it back out; `processSample` gained a fourth `driveAmount`
+  parameter. At `driveAmount == 0`, `driveGain == 1.0f` exactly, so this is
+  `softClip(x) / 1.0f` — byte-identical to before A1 existed.
+- `Source/DSP/Adsr.h/.cpp` — `setCurveEnabled(bool)`; Decay/Release each grew
+  an exponential branch (time-constant = stage seconds / 5, ~99% arrival by
+  the nominal time) alongside the original linear one. Attack stays linear in
+  both modes, per this doc's own v1 scope note. Off (default) takes the
+  original branch untouched.
+- `Source/DSP/Humanise.h` (new) — the pure swing/jitter/velocity-jitter
+  formulas, shared by the arp and the sequencer the same way `StepClock.h`'s
+  `beatsPerStepForDivision` is shared, since both consumers need the exact
+  same arithmetic. Swing takes its odd/even parity from `StepClock::
+  getStepIndex()`, exactly as that method's own comment anticipated.
+- `Source/Arpeggiator.h/.cpp`, `Source/StepSequencer.h/.cpp` — a THIRD
+  scheduling deadline (`noteOnPending`/`samplesUntilNoteOn`), the same
+  "independent countdown, take the min" shape each already used for its
+  gate-off deadline. A step boundary now *schedules* a note-on
+  `Humanise::onsetDelaySamples` samples in the future instead of always
+  firing immediately; at `humaniseAmount == 0` that delay is always exactly
+  0, so the immediate-fire branch is byte-identical to before B2. Both
+  `reset()` and `releaseVoice()` clear the pending state, so a hand-over
+  mid-delay drops the note rather than firing it late — this needed an actual
+  fix (see below), not just a comment. `StepSequencer` additionally needed to
+  clear the OLD note's `gateIsOpen` bookkeeping before scheduling a slide's
+  delayed onset, or the previous note's own stale gate-off deadline could
+  fire mid-delay and cut the slide short.
+- `Source/DSP/Chorus.h/.cpp` (new) — hand-rolled two-tap modulated delay
+  (fixed ~0.6Hz LFO, ~15ms base delay, ±5ms depth, 50/50 wet), left/right
+  reading the LFO π apart. `MainComponent::getNextAudioBlock` calls it once
+  per sample, replacing the mono→stereo copy, only while `chorusEnabled` is
+  on.
+- `Source/UI/SynthPanel.h/.cpp` — new `CHARACTER` section (3 cells: VIM+
+  Chorus toggle stack, Drive, Humanise) between SEQUENCER and OUTPUT, wired
+  through the existing `KnobSpec`/`ToggleSpec` machinery so preset save/load
+  and `refreshControlsFromParameters` cover it for free.
+
+**One real defect found by self-test, not by ear**: the first draft of both
+`Arpeggiator::process` and `StepSequencer::process` asserted a scheduled
+onset was audible one block before it could possibly have fired (the
+scheduling block itself, before the onset's own delay had elapsed) — a
+self-test-authoring mistake, not a DSP one, caught immediately by `cdb.exe`
+per this project's headless-assertion convention rather than surfacing later
+as a mysteriously-early note.
+
+Seven new Debug self-tests (`runAdsrCurveSelfTest`, `runVcfDriveSelfTest`,
+`runChorusSelfTest`, `runHumaniseFormulaSelfTest`, `runArpHumaniseSelfTest`,
+`runSeqHumaniseSelfTest`) plus the six pre-existing ones — 0 assertion hits
+via `cdb.exe`. Builds clean (Debug + Release, zero warnings); both configs
+launch and stay up with no crash.
+
+**Not verified this session**: whether any of this sounds right — CLAUDE.md's
+"what you cannot verify" section reserves that for the user, and it applies
+here more than most items (this whole doc is about a listening-test-driven
+character). MIDI hardware end-to-end also untested (none available).

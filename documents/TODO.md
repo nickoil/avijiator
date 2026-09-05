@@ -278,7 +278,49 @@ Build/validate everything here before touching Android.
       already in `Vcf.cpp` — that one only engages when resonance pushes the
       feedback loop past self-oscillation, and exists so the filter doesn't
       diverge to NaN, not for flavour. See documents/dsp-voice-design.md
-      section 3
+      section 3.
+      **V1 built 2026-09-03** (see character-and-vim.md's "V1 build scope"
+      section for the curated cut this covers — the box above stays
+      unchecked because it still lists the FULL spec, and v1 is deliberately
+      a subset): `Vcf::driveSaturate` (A1 — pushes the existing feedback-loop
+      `softClip` harder via a caller-supplied 0..1 drive, exactly
+      `softClip(x)` at 0); `Adsr::setCurveEnabled` (A2 — exponential
+      Decay/Release, gated by the new `vimEnabled` atomic, linear/unchanged
+      when off); `Humanise::onsetDelaySamples`/`velocityJitterFactor`
+      (B2 — one `humaniseAmount` knob driving swing + timing jitter + velocity
+      jitter, applied as a third scheduling deadline in both
+      `Arpeggiator::process` and `StepSequencer::process`, exactly inert at
+      0); and a new hand-rolled `Chorus` block (B1 — fixed-rate/depth
+      modulated-delay ensemble, replacing `MainComponent`'s mono-to-stereo
+      copy when `chorusEnabled` is on). New `CHARACTER` panel section (VIM +
+      Chorus toggle stack, Drive knob, Humanise knob) sits between SEQUENCER
+      and OUTPUT, picked up by preset save/load automatically (`SynthPanel::
+      forEachSerializableParameter`, no separate serializer change needed).
+      Seven new Debug self-tests (`runAdsrCurveSelfTest`,
+      `runVcfDriveSelfTest`, `runChorusSelfTest`, `runHumaniseFormulaSelfTest`,
+      `runArpHumaniseSelfTest`, `runSeqHumaniseSelfTest`, plus the existing
+      six survived unchanged) prove each new mechanism inert at its knob's
+      default and, for the humanise scheduling specifically, that a pending
+      onset dropped by a hand-over never fires late — one real defect
+      (`Arpeggiator`/`StepSequencer::process` first drafts checked a
+      not-yet-fired scheduled note for sound one block too early) found and
+      fixed by that self-test rather than by ear. Builds clean (Debug +
+      Release, zero warnings); verified via the `cdb.exe` convention — 0
+      assertion hits across all 15 self-tests — and a real launch (Debug and
+      Release) with no crash.
+      **Deliberately deferred, not forgotten** (see the design doc's own
+      scope-cut list): oscillator drift (A3), oversampling (A4),
+      component-bleed/curved-response modelling (A5/A6), output noise floor/
+      saturation/asymmetric clipping (B4), per-note randomisation (B3), mod
+      wheel/aftertouch routing (B5 — no MIDI CC/aftertouch plumbing exists
+      yet), FM/ring-mod (B6), and Chorus/Humanise's own Rate/Depth/
+      Swing-Timing-Velocity split into separate knobs (both v1 scope-cuts,
+      172px of row slack already budgeted for exactly this).
+      **Human-only, not yet done**: whether the drive stage, exponential
+      envelopes, chorus and humanised timing actually sound "in the family"
+      with an SH-101/analogue reference, or just different — CLAUDE.md's
+      "what you cannot verify" section reserves that listening test for the
+      user. Also untested against MIDI hardware this session.
 
 ### Voice follow-ups (deferred out of item 2, not numbered — no reordering)
 

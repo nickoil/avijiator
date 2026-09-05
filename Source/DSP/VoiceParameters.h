@@ -383,6 +383,42 @@ struct VoiceParameters
     // literally the only one, just the unconditional one.
     std::atomic<int> currentStepForUi { -1 };
 
+    //==============================================================================
+    // Item 10 (character-and-vim.md) - v1 scope. See that doc's "V1 build
+    // scope" section for exactly what each one gates and what is
+    // deliberately deferred.
+
+    // Tier 1: the single global "Vim" switch. Discrete, no smoother, same
+    // treatment as every other on/off atomic here (arpEnabled, seqEnabled).
+    // Off on first load - a clean/clinical voice is the safe default, and the
+    // whole point of this switch is that it stays reachable for A/B. Gates
+    // A2 (Adsr's exponential decay/release curves) only in v1 - see that
+    // doc's scope-cut note for what else it will eventually gate.
+    std::atomic<int> vimEnabled { 0 };
+
+    // Tier 2 (A1 - filter drive/saturation): knob-only, no separate toggle -
+    // 0 default is inert, the same "0 = no effect" convention every other
+    // depth knob here already uses (envToCutoffDepthOctaves,
+    // lfoToPitchDepthOctaves, ...). Smoothed like the other Tier 2/depth
+    // knobs - an unsmoothed drive jump would thump the filter's feedback
+    // loop the same way an unsmoothed resonance jump does.
+    std::atomic<float> filterDriveAmount { 0.0f };
+
+    // Tier 2 (B2 - humanise): ONE knob for v1, not Swing/Timing Jitter/
+    // Velocity Jitter as three separate amounts - see the doc's scope-cut
+    // note. 0 = fully quantised, today's exact unswung/unjittered behaviour.
+    // Read raw once per block by Arpeggiator::process/StepSequencer::process,
+    // same treatment as their own arpGateLength/seqGateLength - consumed once
+    // per STEP, not per sample, so smoothing it would just lag the knob for
+    // no benefit.
+    std::atomic<float> humaniseAmount { 0.0f };
+
+    // Tier 1-shaped (B1 - chorus): a plain on/off, not a depth knob - v1
+    // ships fixed internal rate/depth constants (Chorus.h), no Rate/Depth
+    // knobs yet. Off on first load, matching every other "instrument must
+    // play normally out of the box" switch here.
+    std::atomic<int> chorusEnabled { 0 };
+
     static_assert (std::atomic<float>::is_always_lock_free,
                    "Parameter stores must not take a lock on the message thread "
                    "or block the audio thread reading them.");

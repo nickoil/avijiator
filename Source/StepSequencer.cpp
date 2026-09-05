@@ -26,6 +26,11 @@ void StepSequencer::reset() noexcept
     gateIsOpen = false;
     samplesUntilGateOff = 0;
 
+    // A stale pending onset is a count of samples, meaningless after a
+    // restart - same reasoning as samplesUntilGateOff above.
+    noteOnPending = false;
+    samplesUntilNoteOn = 0;
+
     clock.reset();
 }
 
@@ -71,6 +76,11 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
     // note-handling-design.md section 7's revision.
     const auto octaveShift = (float) parameters.masterOctaveShift.load (std::memory_order_relaxed);
 
+    // character-and-vim.md B2 (item 10) - identical treatment to
+    // Arpeggiator::process's own read of the same atomic: consumed once per
+    // STEP inside the loop below, not per sample, so raw rather than smoothed.
+    const auto humaniseAmount = parameters.humaniseAmount.load (std::memory_order_relaxed);
+
     auto offset = 0;
 
     while (offset < numSamples)
@@ -78,10 +88,11 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
         const auto remaining = numSamples - offset;
         const auto toStep = clock.getSamplesUntilNextStep();
 
-        // TWO INDEPENDENT DEADLINES, take the min - identical shape to
-        // Arpeggiator::process. `remaining` stands in for "no deadline"
-        // while the gate is shut.
+        // THREE INDEPENDENT DEADLINES, take the min - identical shape to
+        // Arpeggiator::process, including the B2 addition. `remaining`
+        // stands in for "no deadline" while a flag is not set.
         const auto toGateOff = gateIsOpen ? samplesUntilGateOff : remaining;
+        const auto toNoteOn = noteOnPending ? samplesUntilNoteOn : remaining;
 
         // CLOSE BEFORE OPEN, unconditional on there being a note to open -
         // T3's reasoning applies here identically: a rest can fall while a
@@ -91,6 +102,20 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
         {
             voice.noteOff();
             gateIsOpen = false;
+            continue;                   // this sample may ALSO be a step boundary
+        }
+
+        // A delayed note-on due to fire on the same sample as another note's
+        // gate-off is handled by the branch above first (reached only once
+        // toGateOff has cleared) - same "close before open" ordering intent,
+        // for a note whose open was deferred a few samples past its own step
+        // boundary. See Arpeggiator::process's identical branch.
+        if (noteOnPending && toNoteOn <= 0)
+        {
+            voice.noteOn (pendingPitchLog2Hz, pendingVelocity);
+            samplesUntilGateOff = gateSamplesForStep (clock.getSamplesPerStep(), gateFraction);
+            gateIsOpen = true;
+            noteOnPending = false;
             continue;                   // this sample may ALSO be a step boundary
         }
 
@@ -155,20 +180,74 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
                 // reason). runStepSequencerRenderSelfTest exercises exactly
                 // that case.
                 if (! slide && gateIsOpen)
-                {
                     voice.noteOff();
-                    gateIsOpen = false;
-                }
 
-                // Velocity hardcoded per build step 2 - build step 3 replaces
+                // EITHER WAY, this step's own note-on (immediate or,
+                // character-and-vim.md B2, delayed) supersedes whatever
+                // gate-off countdown belonged to the PREVIOUS note - clearing
+                // gateIsOpen here (not only inside the !slide branch above)
+                // stops that stale deadline from firing during a delayed
+                // onset's own wait, which would otherwise cut a slide short:
+                // samplesUntilGateOff still ticking down from the note this
+                // step is replacing could reach 0 and trigger the gate-off
+                // branch above BEFORE this note's own delayed onset fires,
+                // closing a gate slide deliberately left open. SynthVoice's
+                // own gated state is
+                // untouched here when slide is true - voice.noteOff() above
+                // is what actually silences it, and slide steps deliberately
+                // skip that call, exactly as before this item.
+                //
+                // At humaniseAmount == 0 this line has no observable effect -
+                // gateIsOpen is unconditionally set true again two or six
+                // lines below either way - so the immediate-fire path stays
+                // byte-identical to the code that existed before B2.
+                gateIsOpen = false;
+
+                // character-and-vim.md B2 (item 10). Two draws from the
+                // sequencer's own generator - timing, then velocity - always
+                // taken, even at humaniseAmount == 0, so the RNG sequence
+                // does not depend on the knob (harmless: both formulas below
+                // degrade to an exact no-op at amount == 0 - see Humanise.h).
+                // Swing parity comes from the CLOCK's own step counter, same
+                // as the arp's identical read.
+                const auto timingJitterRaw = humaniseNoise.processSample();
+                const auto velocityJitterRaw = humaniseNoise.processSample();
+                const auto isOddStep = (clock.getStepIndex() % 2) != 0;
+
+                const auto onsetDelay = Humanise::onsetDelaySamples (
+                    clock.getSamplesPerStep(), humaniseAmount, isOddStep, timingJitterRaw);
+
+                // Velocity hardcoded per build step 2 - build step 3 replaced
                 // this with depth-knob routing into currentVelocity's DSP
-                // consumers (SynthVoice.cpp:183-188).
-                voice.noteOn (pitch, accented ? accentedStepVelocity : normalStepVelocity);
+                // consumers (SynthVoice.cpp:183-188); B2 adds jitter on top
+                // of whichever of the two fixed levels applies.
+                const auto baseVelocity = accented ? accentedStepVelocity : normalStepVelocity;
+                const auto jitteredVelocity = juce::jlimit (0.0f, 1.0f,
+                    baseVelocity * Humanise::velocityJitterFactor (humaniseAmount, velocityJitterRaw));
 
-                // Re-derived from the CURRENT step length, every step - same
-                // reasoning as the arp's identical line.
-                samplesUntilGateOff = gateSamplesForStep (clock.getSamplesPerStep(), gateFraction);
-                gateIsOpen = true;
+                // AT humaniseAmount == 0, onsetDelay IS ALWAYS EXACTLY 0 (see
+                // Humanise::onsetDelaySamples), so this branch is always
+                // taken and is BYTE-IDENTICAL to the code that existed before
+                // B2 - the same voice.noteOn call, with jitteredVelocity
+                // degrading to exactly baseVelocity * 1.0f.
+                if (onsetDelay <= 0)
+                {
+                    voice.noteOn (pitch, jitteredVelocity);
+
+                    // Re-derived from the CURRENT step length, every step -
+                    // same reasoning as the arp's identical line.
+                    samplesUntilGateOff = gateSamplesForStep (clock.getSamplesPerStep(), gateFraction);
+                    gateIsOpen = true;
+                }
+                else
+                {
+                    // Scheduled, not fired - the third deadline above picks
+                    // this up once samplesUntilNoteOn reaches 0.
+                    pendingPitchLog2Hz = pitch;
+                    pendingVelocity = jitteredVelocity;
+                    samplesUntilNoteOn = onsetDelay;
+                    noteOnPending = true;
+                }
             }
 
             // Advances even on a rest, to keep grid phase - identical
@@ -177,12 +256,14 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
             continue;
         }
 
-        // TERMINATION IS PROVABLE - identical proof to Arpeggiator::process:
-        // closing the gate clears gateIsOpen so it cannot re-fire until a
-        // step reopens it, advanceStep() adds at least minSamplesPerStep, and
-        // the gate is clamped to [1, stepSamples - 1]. Every path leaves both
-        // deadlines >= 1, chunk >= 1, and offset strictly increases.
-        const auto chunk = juce::jmin (remaining, toStep, toGateOff);
+        // TERMINATION IS PROVABLE - identical proof to Arpeggiator::process,
+        // including the B2 addition: closing a gate or firing a pending
+        // onset clears the flag that guards it, advanceStep() adds at least
+        // minSamplesPerStep, the gate is clamped to [1, stepSamples - 1], and
+        // Humanise::onsetDelaySamples is bounded well under one full step.
+        // Every path leaves all three deadlines >= 1, chunk >= 1, and offset
+        // strictly increases.
+        const auto chunk = juce::jmin (juce::jmin (remaining, toStep), juce::jmin (toGateOff, toNoteOn));
         jassert (chunk > 0);
 
         voice.renderNextBlock (output + offset, chunk);
@@ -190,6 +271,9 @@ void StepSequencer::process (SynthVoice& voice, const NoteStack::Resolution& liv
 
         if (gateIsOpen)
             samplesUntilGateOff -= chunk;
+
+        if (noteOnPending)
+            samplesUntilNoteOn -= chunk;
 
         offset += chunk;
     }
@@ -210,6 +294,12 @@ void StepSequencer::releaseVoice (SynthVoice& voice) noexcept
     }
 
     samplesUntilGateOff = 0;
+
+    // A pending onset (character-and-vim.md B2) belongs to whichever side
+    // was driving the voice when it was scheduled - a hand-over away must
+    // drop it, not fire it late into whatever the new owner starts doing.
+    noteOnPending = false;
+    samplesUntilNoteOn = 0;
 
     // Build step 6: the UI playhead is only meaningful while THIS sequencer
     // owns the voice - leaving it pointing at a stale index after a hand-over
@@ -984,6 +1074,90 @@ void runStepRecordSelfTest()
 
         jassert (std::abs (rig.parameters().stepPitchLog2Hz[0].load() - 11.0f) < 1.0e-6f);
         jassert (rig.parameters().seqRecordArmed.load() == 1);
+    }
+}
+
+//==============================================================================
+void runSeqHumaniseSelfTest()
+{
+    // Exact, not approximate - same reasoning and constant as every other
+    // silence check in this codebase.
+    constexpr float silence = 1.0e-6f;
+
+    // 300BPM/1-32 at 16kHz, same rig and reasoning as runStepSequencerRenderSelfTest.
+    constexpr int samplesPerStep = 400;
+
+    //==========================================================================
+    // BYTE-IDENTICAL AT humaniseAmount == 0 (the default, left untouched
+    // here): two independently-constructed rigs - fresh RNG state each -
+    // over a pattern with several gated steps must render exactly the same
+    // output. Humanise::onsetDelaySamples/velocityJitterFactor short-circuit
+    // to an exact no-op at amount == 0 (Humanise.h), so the jitter draws
+    // taken every gated step (see process()'s own comment) cannot leak into
+    // the output.
+    {
+        SequencerRenderRig rigA;
+        SequencerRenderRig rigB;
+        rigA.setStep (2, 8.0f, true, false, false);
+        rigB.setStep (2, 8.0f, true, false, false);
+        rigA.setStep (5, 9.0f, true, true, false); // accented, exercises the jitteredVelocity path too
+        rigB.setStep (5, 9.0f, true, true, false);
+
+        std::array<float, samplesPerStep * seqMaxSteps> bufferA {};
+        std::array<float, samplesPerStep * seqMaxSteps> bufferB {};
+        rigA.render (bufferA.data(), (int) bufferA.size());
+        rigB.render (bufferB.data(), (int) bufferB.size());
+
+        jassert (peakAbs (bufferA.data(), (int) bufferA.size()) > silence); // sanity - actually sounding
+        jassert (bufferA == bufferB);
+    }
+
+    //==========================================================================
+    // TURNED UP: still sounds, and the sequencer's own gate-close deadline
+    // still settles it back to silence within the pattern - humanise being
+    // live must not, by itself, leave a note stuck open.
+    {
+        SequencerRenderRig rig;
+        rig.parameters().humaniseAmount.store (1.0f);
+        rig.setStep (2, 8.0f, true, false, false);
+        rig.setStep (9, 9.0f, true, true, false);
+
+        std::array<float, samplesPerStep * seqMaxSteps> buffer {};
+        rig.render (buffer.data(), (int) buffer.size());
+        jassert (peakAbs (buffer.data(), (int) buffer.size()) > silence);
+
+        // Step 15 is a rest, comfortably clear of both gated steps' own
+        // auto-close - same idiom runStepSequencerRenderSelfTest's own
+        // single-gated-step case uses.
+        const auto* tail = buffer.data() + samplesPerStep * 15;
+        jassert (peakAbs (tail, samplesPerStep) <= silence);
+    }
+
+    //==========================================================================
+    // A PENDING ONSET SURVIVING A HAND-OVER MUST NOT FIRE LATE - mirrors
+    // runArpHumaniseSelfTest's identical scenario, through the real 3-way
+    // hand-over (SeqTransitionRig) rather than StepSequencer::process alone,
+    // since that is where releaseVoice's noteOnPending/samplesUntilNoteOn
+    // clear actually gets exercised. Sixteenth division gives 800
+    // samples/step at this rig's 16kHz test rate; at humaniseAmount == 1 an
+    // ODD step's swing alone is 0.15 * 800 = 120 samples (jitter can only add
+    // or shave a further 24), so scheduling it and handing the voice away
+    // within the SAME 64-sample block it was scheduled in is guaranteed to
+    // still find it pending.
+    {
+        SeqTransitionRig rig;
+        rig.parameters().humaniseAmount.store (1.0f);
+        rig.parameters().seqDivision.store ((int) StepDivision::Sixteenth);
+        rig.parameters().stepGateOn[1].store (1); // odd step also gated (pitch already 8.0f from the ctor)
+
+        rig.switchToSeq();
+        jassert (rig.run (12) > silence); // step 0 fires near the start and is heard well within these 768 samples
+
+        rig.run (1); // crosses the 800-sample boundary, SCHEDULES step 1's onset - does not fire it here
+
+        rig.switchToKeys(); // hand-over away WHILE the onset is still pending
+        rig.run (4);
+        jassert (rig.run (4) <= silence); // no ghost note arrives late
     }
 }
 

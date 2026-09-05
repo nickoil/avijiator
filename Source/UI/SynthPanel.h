@@ -331,6 +331,20 @@ private:
                                               // uses for this pair; see that
                                               // formula's own comment.
 
+    // Item 10's CHARACTER section (documents/character-and-vim.md's "V1
+    // build scope" section) - same "not part of item 6's original table"
+    // status as numSeqKnobs/numSeqChoices/numSeqToggles above, deliberately
+    // NOT folded into the static_asserts below for the same reason. 3 cells
+    // total: the VIM/Chorus toggle stack, Drive, Humanise - see the doc's
+    // own settled-scope table for why those three and not the full spec's
+    // ~19-cell list.
+    static constexpr int numCharacterKnobs = 2;    // Drive, Humanise
+    static constexpr int numCharacterToggles = 2;  // Vim, Chorus - stacked into ONE
+                                                    // cell via ToggleStack, same
+                                                    // "hardcode 1 cell, not the
+                                                    // toggle count" precedent as
+                                                    // numArpToggles/numSeqToggles.
+
     // The load-bearing counts from section 2: "19 knobs, 6 combo boxes, 2
     // toggles = 27" must still hold after being spread across seven arrays
     // instead of one flat table - a dropped parameter looks completely
@@ -385,6 +399,9 @@ private:
     static const KnobSpec seqKnobSpecs[numSeqKnobs];
     static const ChoiceSpec seqChoiceSpecs[numSeqChoices];
     static const ToggleSpec seqToggleSpecs[numSeqToggles];
+
+    static const KnobSpec characterKnobSpecs[numCharacterKnobs];
+    static const ToggleSpec characterToggleSpecs[numCharacterToggles];
 
     //==========================================================================
     // On-screen keyboard (C3-C4), piano-styled per documents/ui-mockup's
@@ -530,6 +547,16 @@ private:
     juce::Label seqPatternLengthLabel;
     juce::ComboBox seqLaneCombo;
     juce::Label seqLaneLabel;
+
+    // Item 10 (documents/character-and-vim.md) - v1 scope, 3 cells, sitting
+    // between SEQUENCER and OUTPUT on their shared row (that doc's own "V1
+    // build scope" section has the width-budget arithmetic). Cell order is
+    // the VIM/Chorus toggle stack, Drive, Humanise - same "toggle cell goes
+    // first" precedent as ARP/SEQUENCER above.
+    PanelSection characterSection { "CHARACTER" };
+    ToggleStack characterToggleStack;
+    juce::Label characterToggleCaption; // blank - see arpToggleCaption's identical precedent above
+    std::array<KnobCell, numCharacterKnobs> characterKnobs;
 
     StepGrid stepGrid;
 

@@ -4,6 +4,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include "DSP/Humanise.h"
+#include "DSP/NoiseGenerator.h"
 #include "DSP/NoteStack.h"
 #include "DSP/StepClock.h"
 
@@ -185,6 +187,25 @@ private:
     bool gateIsOpen = false;
     int samplesUntilGateOff = 0;
 
+    //==============================================================================
+    // THE THIRD DEADLINE (character-and-vim.md B2, item 10) - identical
+    // mechanism and reasoning to Arpeggiator's own noteOnPending/
+    // samplesUntilNoteOn (Arpeggiator.h), duplicated rather than shared per
+    // this class's own header comment on why the two render loops stay
+    // independently copy-pasted. At humaniseAmount == 0 the delay
+    // Humanise::onsetDelaySamples returns is always exactly 0, so this is
+    // dead code and process()'s step-boundary branch takes the same
+    // immediate-fire statements it always has.
+    bool noteOnPending = false;
+    int samplesUntilNoteOn = 0;
+    float pendingPitchLog2Hz = 0.0f;
+    float pendingVelocity = 0.0f;
+
+    // Distinct seed from every other seeded generator in this codebase -
+    // must not emit the same sequence as the arp's own humaniseNoise or the
+    // filter's floor noise.
+    NoiseGenerator humaniseNoise { 0x2e6b8f17u };
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StepSequencer)
 };
 
@@ -283,5 +304,16 @@ void runSeqTransitionSelfTest();
     already does with no extra state.
 */
 void runStepRecordSelfTest();
+
+/*
+    Debug-only self-test, run once at startup.
+
+    Covers character-and-vim.md B2's own instance in StepSequencer::process -
+    the mirror of runArpHumaniseSelfTest (Arpeggiator.cpp) for the sequencer's
+    copy of the same third-deadline mechanism. Same three proofs: byte-
+    identical at humaniseAmount == 0, no stuck note once turned up, and a
+    pending onset dropped rather than fired late across a hand-over.
+*/
+void runSeqHumaniseSelfTest();
 
 #endif

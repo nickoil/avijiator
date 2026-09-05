@@ -4,6 +4,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "Arpeggiator.h"
+#include "DSP/Chorus.h"
 #include "DSP/NoteEvent.h"
 #include "DSP/NoteStack.h"
 #include "DSP/StepClock.h"
@@ -120,6 +121,12 @@ private:
     // real 3-way hand-over below - arp and sequencer are a mutually exclusive
     // note source, never both driving at once.
     StepSequencer sequencer;
+
+    // character-and-vim.md B1 (item 10). Owned here, not by SynthVoice: it
+    // runs on the STEREO fan-out getNextAudioBlock does after the mono voice
+    // render, not inside the mono voice signal path itself - see that
+    // method's own comment.
+    Chorus chorus;
 
     // AUDIO-THREAD-PRIVATE. Edge-detects arpEnabled/seqEnabled together, since
     // switching either on or off is a HAND-OVER of the voice between three

@@ -1,5 +1,10 @@
 #pragma once
 
+// So JUCE_DEBUG is defined before the #if JUCE_DEBUG block at the bottom of
+// this header regardless of what a given translation unit has included
+// before this header - same self-contained pattern StepClock.h uses.
+#include <juce_core/juce_core.h>
+
 #include "NoiseGenerator.h"
 #include "TptSvfStage.h"
 
@@ -24,9 +29,17 @@
     threshold - it diverges to inf/NaN, since nothing bounds the loop. softClip
     on the feedback path (below) is what makes k > 4 usable at all: it is a
     STABILITY requirement, found by ear when full resonance killed the voice
-    with no recovery, not the flavour a "drive stage" TODO describes. That TODO
-    is still open - a driven stage meant to colour the sound at all levels, not
-    just clamp a runaway loop.
+    with no recovery - it engages only once the loop is already running away,
+    not for flavour.
+
+    character-and-vim.md A1 (the former "drive stage" TODO this class used to
+    describe as still open) is the flavour version: driveSaturate below pushes
+    the SAME feedback-loop signal harder into the SAME softClip nonlinearity,
+    scaled by a caller-supplied 0..1 amount, so cutoff/resonance interaction
+    turns nonlinear and self-oscillation turns more musical at normal signal
+    levels too - not just once resonance pushes the loop past its own
+    stability threshold. Placement (inside the loop, not on the output) is
+    the whole point - see A1's own note in that doc.
 
     See documents/dsp-voice-design.md section 3.
 */
@@ -38,8 +51,10 @@ public:
 
     // Takes cutoff in log2(Hz) - the caller sums its modulation in the octave
     // domain and exp2 happens in here, once, after that sum. Resonance is
-    // 0..1, mapped onto the feedback gain internally.
-    float processSample (float input, float cutoffLog2Hz, float resonance01) noexcept;
+    // 0..1, mapped onto the feedback gain internally. driveAmount is 0..1
+    // (character-and-vim.md A1) - see the doc comment on driveSaturate below
+    // for what it does and why it is byte-identical at 0.
+    float processSample (float input, float cutoffLog2Hz, float resonance01, float driveAmount) noexcept;
 
 private:
     TptSvfCoefficients makeCoefficients (float cutoffHz) const noexcept;
@@ -57,6 +72,15 @@ private:
     // away. The voiced drive/saturation TODO is a different, larger thing:
     // a driven stage intended to colour the sound at all levels.
     static float softClip (float x) noexcept;
+
+    // character-and-vim.md A1. Pushes x harder into softClip's SAME
+    // nonlinearity by a caller-supplied gain, then pulls that gain back out
+    // afterwards - so the shape saturates more as driveAmount rises, but the
+    // overall level does not simply get louder. At driveAmount == 0,
+    // driveGain is exactly 1.0f, so this is `softClip (x) / 1.0f` -
+    // byte-identical to calling softClip(x) directly. See processSample's
+    // own comment for where this sits in the feedback loop.
+    static float driveSaturate (float x, float driveAmount) noexcept;
 
     static constexpr float softClipThreshold = 1.0f;
 
@@ -77,6 +101,13 @@ private:
     // 1 = level held flat, which sounds thin and clinical.
     static constexpr float resonanceCompensation = 0.5f;
 
+    // BY EAR, not derived - same posture as maxFeedback/resonanceCompensation
+    // above. driveSaturate's gain at driveAmount == 1: pushes the feedback
+    // signal to 6x softClipThreshold before the makeup division, comfortably
+    // into the tanh curve's compressed region without needing a second knob
+    // to tame level. See character-and-vim.md A1.
+    static constexpr float maxDriveGain = 6.0f;
+
     // -120 dBFS. A perfectly zero input into a perfectly zero state stays
     // zero forever, so self-oscillation would never start. Real analogue
     // starts from thermal noise; this is the equivalent. It also keeps the
@@ -96,3 +127,21 @@ private:
     // audible noise source.
     NoiseGenerator floorNoise { 0x5bf03635u };
 };
+
+//==============================================================================
+#if JUCE_DEBUG
+
+/*
+    Debug-only self-test, run once at startup.
+
+    Covers character-and-vim.md A1: driveSaturate's presence inside
+    processSample's feedback loop. Proves, in order: driveAmount == 0 renders
+    byte-identical to a driveAmount that was never introduced at all - not
+    approximately, exactly, sample for sample, over a real sweep through the
+    filter rather than a single static input; and driveAmount turned up
+    changes the output - the term is actually reaching the loop, not a dead
+    parameter.
+*/
+void runVcfDriveSelfTest();
+
+#endif

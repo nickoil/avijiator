@@ -320,6 +320,28 @@ const ToggleSpec SynthPanel::seqToggleSpecs[numSeqToggles] =
 };
 
 //==============================================================================
+// Item 10 (documents/character-and-vim.md). Both knobs are 0..1, 0-default -
+// the same "0 = no effect" convention every other depth knob in this file
+// already uses (envToCutoffDepthOctaves, lfoToPitchDepthOctaves, ...), not a
+// new pattern. Drive is knob-only, no separate toggle - the doc's own
+// scope-cut note for why.
+const KnobSpec SynthPanel::characterKnobSpecs[numCharacterKnobs] =
+{
+    { "Drive",     0.0, 1.0, 0.0, false, 0.0, "", &VoiceParameters::filterDriveAmount },
+    { "Humanise",  0.0, 1.0, 0.0, false, 0.0, "", &VoiceParameters::humaniseAmount    },
+};
+
+// Off on first load, same reasoning as every other "instrument must play
+// normally out of the box" toggle in this file (arpToggleSpecs' "On" entry,
+// seqToggleSpecs' "On" entry) - a clean/clinical voice is the safe default,
+// per the doc's own "always tasteful, but stay reachable" design principle.
+const ToggleSpec SynthPanel::characterToggleSpecs[numCharacterToggles] =
+{
+    { "Vim",    0, &VoiceParameters::vimEnabled    },
+    { "Chorus", 0, &VoiceParameters::chorusEnabled },
+};
+
+//==============================================================================
 // One octave, C3 to C4 inclusive - the closing C makes it read as a keyboard
 // rather than stopping awkwardly on B. `letter` matches QwertyNoteInput.cpp's
 // keyMap base-row entries exactly (Z S X D C V G B H N J M, then Q for the
@@ -888,8 +910,17 @@ SynthPanel::SynthPanel (VoiceParameters& parametersToControl, std::function<void
     seqLaneCombo.onChange(); // seed, matching every attach helper's own seed call
     seqControlSection.addCell (seqLaneLabel, seqLaneCombo, false);
 
+    // Item 10 (documents/character-and-vim.md). Toggle-stack cell first, same
+    // precedent as ARP/SEQUENCER above.
+    attachToggle (characterToggleStack.top, characterToggleSpecs[0], params);
+    attachToggle (characterToggleStack.bottom, characterToggleSpecs[1], params);
+    characterSection.addCell (characterToggleCaption, characterToggleStack);
+
+    wireKnobs (characterKnobs, characterKnobSpecs, numCharacterKnobs, characterSection);
+
     for (auto* section : { &vcoSection, &vcfSection, &envSection, &lfoSection,
-                            &keyboardSection, &arpSection, &outputSection, &seqControlSection })
+                            &keyboardSection, &arpSection, &outputSection, &seqControlSection,
+                            &characterSection })
         addAndMakeVisible (*section);
 
     stepGrid.configure (params);
@@ -1032,6 +1063,10 @@ void SynthPanel::refreshControlsFromParameters()
     choices (seqChoices, seqChoiceSpecs, numSeqChoices);
     knobs (seqKnobs, seqKnobSpecs, numSeqKnobs);
 
+    refreshToggle (characterToggleStack.top, characterToggleSpecs[0], params);
+    refreshToggle (characterToggleStack.bottom, characterToggleSpecs[1], params);
+    knobs (characterKnobs, characterKnobSpecs, numCharacterKnobs);
+
     // Hand-wired, non-spec-table controls (see their own comments in the
     // constructor for why attachChoice doesn't cover them).
     seqPatternLengthCombo.setSelectedId (params.seqPatternLength.load (std::memory_order_relaxed),
@@ -1097,6 +1132,8 @@ void SynthPanel::forEachSerializableParameter (
     knobs   ("seq",      seqKnobSpecs,      numSeqKnobs);
     choices ("seq",      seqChoiceSpecs,    numSeqChoices);
     toggles ("seq",      seqToggleSpecs,    numSeqToggles);
+    knobs   ("character", characterKnobSpecs,   numCharacterKnobs);
+    toggles ("character", characterToggleSpecs, numCharacterToggles);
 }
 
 //==============================================================================
@@ -1307,6 +1344,14 @@ void SynthPanel::resized()
         // and Lane cells - neither is a ChoiceSpec, see numSeqChoices' own
         // comment in SynthPanel.h.
         place (row, seqControlSection, 1 + numSeqChoices + numSeqKnobs + 2);
+
+        // Item 10 (documents/character-and-vim.md) - inserted between
+        // SEQUENCER and OUTPUT, per that doc's own "V1 build scope" width
+        // arithmetic. 1 = the Vim/Chorus stacked toggle cell, same
+        // "hardcode 1, not the toggle count" precedent as seqControlSection's
+        // own line above.
+        place (row, characterSection, 1 + numCharacterKnobs);
+
         place (row, outputSection, numOutputKnobs + 1); // +1 = the Octave cell
     }
     area.removeFromTop (gap);

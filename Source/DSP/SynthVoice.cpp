@@ -26,6 +26,7 @@ void SynthVoice::prepare (double newSampleRate)
     lfoToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
     velocityToAmpDepthSmoothed.reset (newSampleRate, rampSeconds);
     velocityToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
+    filterDriveAmountSmoothed.reset (newSampleRate, rampSeconds);
 
     // Not part of snapshotParameters' apply() list below - setStepFilterModulation
     // drives these directly - but still need their ramp step-size machinery
@@ -153,6 +154,7 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
     apply (lfoToCutoffDepthSmoothed, lastLfoToCutoffDepth, parameters.lfoToCutoffDepthOctaves.load (std::memory_order_relaxed));
     apply (velocityToAmpDepthSmoothed, lastVelocityToAmpDepth, parameters.velocityToAmpDepth.load (std::memory_order_relaxed));
     apply (velocityToCutoffDepthSmoothed, lastVelocityToCutoffDepth, parameters.velocityToCutoffDepthOctaves.load (std::memory_order_relaxed));
+    apply (filterDriveAmountSmoothed, lastFilterDriveAmount, parameters.filterDriveAmount.load (std::memory_order_relaxed));
 }
 
 void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
@@ -177,6 +179,11 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
     envelope.setAttackSeconds  (parameters.attackSeconds .load (std::memory_order_relaxed));
     envelope.setDecaySeconds   (parameters.decaySeconds  .load (std::memory_order_relaxed));
     envelope.setReleaseSeconds (parameters.releaseSeconds.load (std::memory_order_relaxed));
+
+    // character-and-vim.md A2 (item 10). Discrete switch, raw per block -
+    // same treatment as envelopeDestination/lfoWaveform below. Off is the
+    // default, so this hits the ADSR's original linear branch untouched.
+    envelope.setCurveEnabled (parameters.vimEnabled.load (std::memory_order_relaxed) != 0);
 
     // Envelope destination is a discrete switch, read once per block like the
     // times above - see documents/envelope-lfo-design.md section 5.
@@ -290,7 +297,8 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         const auto resonance01 = juce::jlimit (0.0f, 1.0f,
             resonanceSmoothed.getNextValue() + stepResonanceNormSmoothed.getNextValue());
 
-        const auto filtered = filter.processSample (mix, cutoffOctaves, resonance01);
+        const auto filtered = filter.processSample (mix, cutoffOctaves, resonance01,
+                                                     filterDriveAmountSmoothed.getNextValue());
 
         output[i] = Vca::processSample (filtered, outputLevelSmoothed.getNextValue(), amplitudeModulation);
     }

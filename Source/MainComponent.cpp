@@ -193,6 +193,27 @@ MainComponent::MainComponent()
     // preset sounds slightly different" weeks later, not as a crash - see
     // documents/settings-persistence-design.md section 10.
     runPresetRoundTripSelfTest();
+
+    // Item 10 (character-and-vim.md), A2: Adsr::setCurveEnabled's two
+    // branches - the OFF path must stay byte-identical to the linear
+    // arithmetic that predates this item, and the ON path must actually
+    // reach its target rather than asymptoting forever.
+    runAdsrCurveSelfTest();
+
+    // Item 10, A1: Vcf::driveSaturate must be exactly softClip(x) at
+    // driveAmount == 0, and must audibly change the filter's output once
+    // turned up.
+    runVcfDriveSelfTest();
+
+    // Item 10, B2: the arp's and the sequencer's humanise onset-delay
+    // scheduling (the "third deadline") - byte-identical at humaniseAmount
+    // == 0, and no stuck note introduced by the extra scheduling state.
+    runArpHumaniseSelfTest();
+    runSeqHumaniseSelfTest();
+
+    // Item 10, B1: Chorus produces a genuinely stereo, bounded, finite
+    // signal - the piece getNextAudioBlock's chorusEnabled branch depends on.
+    runChorusSelfTest();
    #endif
 
     // Item 9, section 9: a curated starting set, written once, only if the
@@ -388,6 +409,10 @@ void MainComponent::prepareToPlay (int /*samplesPerBlockExpected*/, double sampl
     arp.prepare (sampleRate);
     sequencer.prepare (sampleRate);
 
+    // A device change means a stale delay-line read position and LFO phase
+    // are meaningless at the new rate, same reasoning as arp/sequencer above.
+    chorus.prepare (sampleRate);
+
     // Force the first block after a device change to re-run the hand-over,
     // whichever side happens to be switched on.
     voiceOwner = VoiceOwner::Keys;
@@ -419,6 +444,34 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
     // documents/step-sequencer-design.md section 6.
     renderVoiceBlock (voice, router, arp, sequencer, voiceOwner, mono, numSamples);
 
+    // character-and-vim.md B1: with chorus on and a real stereo output to
+    // write into, REPLACE the plain mono-copied-to-both-channels fan-out
+    // with the ensemble's own independently-modulated L/R pair, rather than
+    // mixing it in afterwards - the doc's "stereo width" framing is about
+    // what the two channels ARE, not an added effect layer. Off (the
+    // default) leaves this whole block dead code and the fan-out below
+    // exactly as it always was.
+    if (voice.getParameters().chorusEnabled.load (std::memory_order_relaxed) != 0
+        && buffer->getNumChannels() >= 2)
+    {
+        auto* left = mono; // channel 0's own write pointer - writing in place is safe,
+                            // each iteration reads mono[i] before overwriting it.
+        auto* right = buffer->getWritePointer (1, startSample);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float outLeft = 0.0f, outRight = 0.0f;
+            chorus.processSample (mono[i], outLeft, outRight);
+            left[i] = outLeft;
+            right[i] = outRight;
+        }
+
+        for (int channel = 2; channel < buffer->getNumChannels(); ++channel)
+            buffer->copyFrom (channel, startSample, left, numSamples);
+
+        return;
+    }
+
     for (int channel = 1; channel < buffer->getNumChannels(); ++channel)
         buffer->copyFrom (channel, startSample, mono, numSamples);
 }
@@ -435,6 +488,11 @@ void MainComponent::releaseResources()
     router.reset();
     arp.reset();
     sequencer.reset();
+
+    // Hygiene, same reasoning as the three resets above: a restart should not
+    // pick up whatever was left sitting in the delay line from before the
+    // device stopped.
+    chorus.reset();
 }
 
 void MainComponent::paint (juce::Graphics& g)

@@ -179,6 +179,11 @@ private:
     Smoothed velocityToAmpDepthSmoothed;
     Smoothed velocityToCutoffDepthSmoothed;
 
+    // character-and-vim.md A1 (item 10). Smoothed like every other depth
+    // knob here - an unsmoothed jump would thump the filter's feedback loop
+    // the same way an unsmoothed resonance jump does.
+    Smoothed filterDriveAmountSmoothed;
+
     // Item 7 build step 5. NOT part of the lastXxx-guarded apply() list below
     // - setStepFilterModulation pushes these two directly via setTargetValue,
     // since the caller (StepSequencer) already knows exactly when a value
@@ -205,6 +210,7 @@ private:
     float lastLfoToCutoffDepth = 0.0f;
     float lastVelocityToAmpDepth = 0.0f;
     float lastVelocityToCutoffDepth = 0.0f;
+    float lastFilterDriveAmount = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)
 };

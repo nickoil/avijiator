@@ -7,6 +7,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include "DSP/Humanise.h"
 #include "DSP/NoiseGenerator.h"
 #include "DSP/NoteStack.h"
 #include "DSP/StepClock.h"
@@ -304,6 +305,31 @@ private:
     int samplesUntilGateOff = 0;
 
     //==============================================================================
+    // THE THIRD DEADLINE (character-and-vim.md B2, item 10). A step boundary
+    // that chose a note to play does not necessarily fire it immediately any
+    // more - Humanise::onsetDelaySamples can push it a few samples LATE
+    // (swing, timing jitter), and this is the countdown for that, same
+    // "independent countdown, take the min" shape as samplesUntilGateOff
+    // above. At humaniseAmount == 0 the delay is always exactly 0 (see that
+    // function's own comment), so noteOnPending is never set true and this
+    // whole mechanism is dead code - the step-boundary branch takes the
+    // EXACT same immediate-fire statements process() always has. Pitch and
+    // velocity are captured at scheduling time, not re-derived at fire time -
+    // `active` is a view into state (NoteStack/the arp's own latch) that
+    // could theoretically change in the few samples between scheduling and
+    // firing, and the note that was actually CHOSEN is the one that must
+    // sound.
+    bool noteOnPending = false;
+    int samplesUntilNoteOn = 0;
+    float pendingPitchLog2Hz = 0.0f;
+    float pendingVelocity = 0.0f;
+
+    // Distinct seed, same reasoning as randomSource below and every other
+    // seeded generator in this codebase - this must not emit the same
+    // sequence as the Random pattern's own walker noise.
+    NoiseGenerator humaniseNoise { 0x7c1f9a3du };
+
+    //==============================================================================
     // int, not uint8_t, so "no note played yet" is representable.
     int lastNoteNumber = -1;
 
@@ -428,5 +454,20 @@ void runArpPatternSelfTest();
     See documents/arpeggiator-design.md sections 7 and 12.
 */
 void runArpTransitionSelfTest();
+
+/*
+    Debug-only self-test, run once at startup.
+
+    Covers character-and-vim.md B2's own instance: the third-deadline onset
+    delay in Arpeggiator::process. Proves, in order: humaniseAmount == 0
+    renders byte-identical to before this feature existed (a real render
+    through renderVoiceBlock, not a re-implementation of the scheduling); a
+    turned-up amount delays note onsets without ever losing one (the same
+    peak-amplitude-in-a-window technique runArpTransitionSelfTest's own rig
+    uses); and no stuck note is introduced by the extra pending-onset state
+    across a hand-over mid-delay - the one new way this item could reintroduce
+    the exact failure mode runArpTransitionSelfTest exists to rule out.
+*/
+void runArpHumaniseSelfTest();
 
 #endif
