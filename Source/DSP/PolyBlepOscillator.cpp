@@ -5,6 +5,7 @@
 void PolyBlepOscillator::prepare (double newSampleRate) noexcept
 {
     inverseSampleRate = 1.0 / newSampleRate;
+    subDrift.prepare (newSampleRate);
     reset();
 }
 
@@ -12,6 +13,7 @@ void PolyBlepOscillator::reset() noexcept
 {
     phase = 0.0;
     subHigh = false;
+    subDrift.reset();
 }
 
 void PolyBlepOscillator::setFrequency (float frequencyHz) noexcept
@@ -85,7 +87,23 @@ PolyBlepOscillator::Frame PolyBlepOscillator::processSample() noexcept
     // saw, audible as slow beating over tens of seconds. Deriving it makes it
     // phase-locked by construction, exactly like the SH-101's flip-flop
     // divider hanging off the VCO.
-    const auto subPhase = 0.5f * t + (subHigh ? 0.5f : 0.0f);
+    // character-and-vim.md A3: a small, bounded, slowly-wandering phase
+    // offset, independent of the main oscillator's own drift (see the class
+    // comment for why a phase offset here rather than a frequency offset).
+    // subDriftEnabled == false (the default) makes this always exactly
+    // 0.0f - byte-identical to before A3 - though the generator's own state
+    // still advances regardless (harmless, and simpler than gating the call
+    // itself: same "always draw, zero contribution when off" posture the
+    // arp/seq's own humanise generators use).
+    const auto rawSubDrift = subDrift.processSample();
+    const auto subDriftPhase = subDriftEnabled ? rawSubDrift * maxSubDriftPhaseFraction : 0.0f;
+
+    auto subPhase = 0.5f * t + (subHigh ? 0.5f : 0.0f) + subDriftPhase;
+    if (subPhase >= 1.0f)
+        subPhase -= 1.0f;
+    else if (subPhase < 0.0f)
+        subPhase += 1.0f;
+
     const auto subDt = 0.5f * dt;
 
     auto subFallingPhase = subPhase + 0.5f;

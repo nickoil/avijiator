@@ -4,6 +4,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "Arpeggiator.h"
+#include "DSP/CharacterProcessor.h"
 #include "DSP/Chorus.h"
 #include "DSP/NoteEvent.h"
 #include "DSP/NoteStack.h"
@@ -121,6 +122,13 @@ private:
     // real 3-way hand-over below - arp and sequencer are a mutually exclusive
     // note source, never both driving at once.
     StepSequencer sequencer;
+
+    // character-and-vim.md B4 (item 10), Tier 1 "Vim" - noise floor and
+    // output saturation/asymmetric clipping. Owned here, not by SynthVoice:
+    // it is an OUTPUT-stage effect (the doc's own "master bus" framing),
+    // applied to the mono mix in getNextAudioBlock BEFORE chorus - real
+    // analogue signal order is saturation/glue first, stereo widening after.
+    CharacterProcessor characterProcessor;
 
     // character-and-vim.md B1 (item 10). Owned here, not by SynthVoice: it
     // runs on the STEREO fan-out getNextAudioBlock does after the mono voice

@@ -365,3 +365,95 @@ launch and stay up with no crash.
 "what you cannot verify" section reserves that for the user, and it applies
 here more than most items (this whole doc is about a listening-test-driven
 character). MIDI hardware end-to-end also untested (none available).
+
+---
+
+## Rest of Tier 1 — build record (session of 2026-09-05)
+
+Same session, later on: the user asked what VIM currently does, then how much
+work the rest of Tier 1 was, then said to build it. Two design questions came
+up along the way and were put to the user rather than guessed at:
+
+1. **A3's sub-oscillator drift.** `PolyBlepOscillator.cpp` derives the
+   sub-oscillator's phase arithmetically from the main phase ON PURPOSE — a
+   second free-running accumulator was explicitly rejected there (its own
+   comment: it "would slowly slip phase against the saw, audible as slow
+   beating over tens of seconds"). A3 asks for main and sub to "drift against
+   each other", which naively conflicts with that invariant. **Settled**: sub
+   gets its own independently-seeded `OscillatorDrift` instance, but applied
+   as a small, BOUNDED, slowly-wandering PHASE OFFSET added into the derived
+   sub phase — not a second frequency/accumulator. `OscillatorDrift` is a
+   leaky integrator (bounded by construction, decays back toward 0), not a
+   free-running one, so it cannot reintroduce the rejected failure mode; it
+   can only wobble within its own bounded range. Chosen over the two
+   alternatives offered (sub tracks main's drift value; skip sub drift
+   entirely) as the one that actually matches the spec's "against each
+   other" without the risk.
+2. **A5 (component-bleed).** Left deferred, per the user's choice — the doc's
+   own examples ("envelope faintly affecting cutoff even when not routed")
+   arguably contradict existing, deliberate behaviour (Envelope Destination =
+   Amp means the envelope does not touch the filter, full stop), and the doc
+   itself calls this item "texture, not a parameter" rather than a crisp
+   spec. Revisit with a real design pass, not a guess.
+
+**Built**, all gated by the SAME `vimEnabled` atomic A2 already reads — no
+new controls, per Tier 1's own "one switch, no sub-parameters" design:
+
+- **A3 — oscillator drift.** New `Source/DSP/OscillatorDrift.h/.cpp`: a
+  one-pole leaky integrator fed by white noise (`state = state*decayCoeff +
+  noise*stepGain`), producing a bounded, unscaled value nominally in roughly
+  [-1, 1] regardless of sample rate (`stepGain` is solved so the walk's
+  steady-state variance is 1). Two independently-seeded instances:
+  - **Main** — `SynthVoice` owns one, scaled to ±2 cents (`maxMainDriftOctaves`)
+    and summed into the existing pitch-modulation-in-octaves point, exactly
+    like every other pitch modulator there (LFO, glide). Always advances
+    (`processSample()` called every sample regardless of `vimEnabled`, same
+    "always draw, zero contribution when off" posture the arp/seq's humanise
+    generators already established); the CONTRIBUTION is exactly `0.0f` when
+    off, not merely small.
+  - **Sub** — lives inside `PolyBlepOscillator` itself (`setDriftEnabled`,
+    mirroring `Adsr::setCurveEnabled`'s shape), scaled to a ±0.01-cycle
+    bounded phase offset added directly into the arithmetically-derived
+    `subPhase` before the PolyBLEP edge calculations, wrapped back into
+    [0, 1). See design question 1 above for why this shape and not a second
+    accumulator.
+- **A6 — curved velocity response.** `curvedVelocity()` in the new
+  `Source/DSP/CharacterProcessor.h` — `velocity^2`, chosen for exact endpoint
+  preservation (0→0, 1→1, so a full-velocity note is unaffected either way)
+  while satisfying the doc's "small deltas at low values are less audible"
+  shape. Scope deliberately narrowed to velocity's own response curve only —
+  NOT also a curve on the modulation-DEPTH knobs (envelope/LFO depth), which
+  the doc's wording could also be read as asking for; that reading felt like
+  it would double up with A2's already-curved envelope shape and with future
+  knob-taper decisions, so it was left out rather than guessed at. `SynthVoice`
+  computes `effectiveVelocity` once per block (velocity is constant across a
+  block) and uses it everywhere `currentVelocity` used to feed the amp/cutoff
+  summing points.
+- **B4 — noise floor + output saturation + asymmetric clipping.** One class,
+  `CharacterProcessor`, bundling all three (per B4's own "Tier 1 — all three,
+  no exposed parameters" note) — NOT the same mechanism as `Vcf`'s existing
+  `softClip` (that one lives inside the filter's feedback loop and is a
+  stability requirement, not flavour). `-70dBFS` broadband hiss, then an
+  asymmetric `tanh(x*drive)/drive` shaper (different `drive` for positive vs.
+  negative swings — real transistor/diode asymmetry, even-harmonic "warmth"
+  rather than a symmetric clipper's odd-harmonic-only spectrum; both branches
+  have small-signal gain exactly 1, so normal-level signal passes through
+  untouched and only peaks saturate). Owned by `MainComponent`, applied to
+  the mono mix right after `renderVoiceBlock` and BEFORE `Chorus` — matches a
+  real analogue chain's order (glue/saturation first, stereo widening after).
+
+Four new Debug self-tests (`runOscillatorDriftSelfTest`,
+`runCharacterProcessorSelfTest`, `runVimCharacterSelfTest` — the last one an
+integration proof through `SynthVoice::renderNextBlock` that `vimEnabled ==
+false` still renders byte-identical across independent runs and `true`
+genuinely changes the output) plus the seven from the first build-record
+entry and the six pre-existing ones — **18 total**, 0 assertion hits via
+`cdb.exe`. Builds clean (Debug + Release, zero warnings); Release launched
+and stayed up with no crash.
+
+**Not verified this session**: same caveat as above, doubly so now — drift,
+the velocity curve, and the noise floor/saturation are all explicitly
+*sub-conscious* per the doc's own testing notes ("evaluate them by toggling
+during sustained playing, not by soloing them"), which makes them the
+hardest items in this whole doc to judge by a quick listen. MIDI hardware
+still untested.

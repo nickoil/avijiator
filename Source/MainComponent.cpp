@@ -214,6 +214,20 @@ MainComponent::MainComponent()
     // Item 10, B1: Chorus produces a genuinely stereo, bounded, finite
     // signal - the piece getNextAudioBlock's chorusEnabled branch depends on.
     runChorusSelfTest();
+
+    // Item 10, A3: OscillatorDrift stays bounded/finite, and two
+    // independently-seeded instances actually diverge.
+    runOscillatorDriftSelfTest();
+
+    // Item 10, A6/B4: curvedVelocity's endpoints/monotonicity, and
+    // CharacterProcessor's exact pass-through when disabled vs. its bounded,
+    // asymmetric, noise-floor-bearing output when enabled.
+    runCharacterProcessorSelfTest();
+
+    // Item 10, A3/A6 integration: vimEnabled reaching SynthVoice's real
+    // render path - byte-identical at the default, genuinely different once
+    // turned on.
+    runVimCharacterSelfTest();
    #endif
 
     // Item 9, section 9: a curated starting set, written once, only if the
@@ -412,6 +426,7 @@ void MainComponent::prepareToPlay (int /*samplesPerBlockExpected*/, double sampl
     // A device change means a stale delay-line read position and LFO phase
     // are meaningless at the new rate, same reasoning as arp/sequencer above.
     chorus.prepare (sampleRate);
+    characterProcessor.prepare (sampleRate);
 
     // Force the first block after a device change to re-run the hand-over,
     // whichever side happens to be switched on.
@@ -443,6 +458,16 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
     // by reference. See documents/arpeggiator-design.md section 7 and
     // documents/step-sequencer-design.md section 6.
     renderVoiceBlock (voice, router, arp, sequencer, voiceOwner, mono, numSamples);
+
+    // character-and-vim.md B4, Tier 1 "Vim" - noise floor and output
+    // saturation/asymmetric clipping, applied to the mono mix BEFORE chorus
+    // (real analogue signal order: glue/saturation first, stereo widening
+    // after). setEnabled mirrors SynthVoice's own once-per-block vimEnabled
+    // read; off (the default) makes processSample an exact pass-through, so
+    // this loop is a no-op read-then-write-the-same-value in that case.
+    characterProcessor.setEnabled (voice.getParameters().vimEnabled.load (std::memory_order_relaxed) != 0);
+    for (int i = 0; i < numSamples; ++i)
+        mono[i] = characterProcessor.processSample (mono[i]);
 
     // character-and-vim.md B1: with chorus on and a real stereo output to
     // write into, REPLACE the plain mono-copied-to-both-channels fan-out
@@ -493,6 +518,7 @@ void MainComponent::releaseResources()
     // pick up whatever was left sitting in the delay line from before the
     // device stopped.
     chorus.reset();
+    characterProcessor.reset();
 }
 
 void MainComponent::paint (juce::Graphics& g)

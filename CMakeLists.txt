@@ -53,6 +53,8 @@ target_sources(Avijiator
         Source/DSP/Vcf.cpp
         Source/DSP/Adsr.cpp
         Source/DSP/Chorus.cpp
+        Source/DSP/OscillatorDrift.cpp
+        Source/DSP/CharacterProcessor.cpp
         Source/DSP/Lfo.cpp
         Source/DSP/NoteStack.cpp
         Source/UI/PanelLookAndFeel.cpp

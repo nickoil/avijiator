@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 
+#include "CharacterProcessor.h"
+
 void SynthVoice::prepare (double newSampleRate)
 {
     oscillator.prepare (newSampleRate);
@@ -11,6 +13,7 @@ void SynthVoice::prepare (double newSampleRate)
     envelope.prepare (newSampleRate);
     lfo.prepare (newSampleRate);
     glide.prepare (newSampleRate);
+    mainDrift.prepare (newSampleRate);
 
     sawLevelSmoothed.reset (newSampleRate, rampSeconds);
     pulseLevelSmoothed.reset (newSampleRate, rampSeconds);
@@ -45,6 +48,7 @@ void SynthVoice::reset() noexcept
     filter.reset();
     envelope.reset();
     lfo.reset();
+    mainDrift.reset();
 
     // Middle C, purely as a defined starting point - the first note-on snaps
     // away from it before anything is audible, since a fresh trigger never
@@ -180,10 +184,28 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
     envelope.setDecaySeconds   (parameters.decaySeconds  .load (std::memory_order_relaxed));
     envelope.setReleaseSeconds (parameters.releaseSeconds.load (std::memory_order_relaxed));
 
-    // character-and-vim.md A2 (item 10). Discrete switch, raw per block -
-    // same treatment as envelopeDestination/lfoWaveform below. Off is the
-    // default, so this hits the ADSR's original linear branch untouched.
-    envelope.setCurveEnabled (parameters.vimEnabled.load (std::memory_order_relaxed) != 0);
+    // character-and-vim.md item 10, Tier 1 "Vim". Discrete switch, raw per
+    // block - same treatment as envelopeDestination/lfoWaveform below.
+    // Shared by every Tier 1 mechanism this class gates (A2's envelope
+    // curves, A3's main-oscillator and sub-oscillator drift, A6's velocity
+    // curve) - one atomic, one read, matching the doc's own "one switch, no
+    // sub-parameters" design.
+    const auto vimEnabled = parameters.vimEnabled.load (std::memory_order_relaxed) != 0;
+
+    // A2. Off (the default) hits the ADSR's original linear branch untouched.
+    envelope.setCurveEnabled (vimEnabled);
+
+    // A3. Off (the default) makes the sub-oscillator's own drift always
+    // exactly 0.0f - see PolyBlepOscillator::setDriftEnabled's own comment.
+    oscillator.setDriftEnabled (vimEnabled);
+
+    // A6. currentVelocity is constant across a whole block (set once at
+    // noteOn, never mid-block - note events are drained before this runs),
+    // so the curve only needs computing once here rather than per sample.
+    // Off (the default) is currentVelocity itself, untouched - see
+    // curvedVelocity's own comment for why the curve is a no-op nowhere
+    // except at the identity points regardless.
+    const auto effectiveVelocity = vimEnabled ? curvedVelocity (currentVelocity) : currentVelocity;
 
     // Envelope destination is a discrete switch, read once per block like the
     // times above - see documents/envelope-lfo-design.md section 5.
@@ -232,7 +254,7 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         // term it multiplies against below - a patch that never touches this
         // knob renders byte-identically to before this step, whatever
         // velocity happens to arrive.
-        const auto velocityAmpFactor = 1.0f - velocityToAmpDepthSmoothed.getNextValue() * (1.0f - currentVelocity);
+        const auto velocityAmpFactor = 1.0f - velocityToAmpDepthSmoothed.getNextValue() * (1.0f - effectiveVelocity);
 
         // Amplitude modulation summing point - the shared ADSR (when routed
         // to the VCA) and item 7's accent multiply in here. Multiplicative
@@ -241,10 +263,19 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         // zero-defaulted.
         const auto amplitudeModulation = (routeEnvToAmp ? envValue : 1.0f) * velocityAmpFactor;
 
+        // character-and-vim.md A3: the main oscillator's own drift, in
+        // octaves - see mainDrift's own comment in SynthVoice.h. Called every
+        // sample regardless of vimEnabled (harmless - same "always advance,
+        // zero contribution when off" posture as PolyBlepOscillator's own
+        // sub-drift and the arp/seq's humanise generators), so the term is
+        // EXACTLY 0.0f when off (0.0f * anything == 0.0f), not merely small.
+        const auto rawMainDrift = mainDrift.processSample();
+        const auto mainDriftOctaves = vimEnabled ? rawMainDrift * maxMainDriftOctaves : 0.0f;
+
         // Pitch modulation summing point, in octaves. Item 4's glide will add
         // its offset here too. Octaves rather than Hz so modulators compose
         // musically at any pitch.
-        const auto pitchModulationOctaves = lfoValue * lfoToPitchDepthSmoothed.getNextValue();
+        const auto pitchModulationOctaves = lfoValue * lfoToPitchDepthSmoothed.getNextValue() + mainDriftOctaves;
 
         const auto pitchOctaves = glide.processSample() + pitchModulationOctaves;
         oscillator.setFrequency (std::exp2 (pitchOctaves));
@@ -277,7 +308,7 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         const auto cutoffModulationOctaves =
             (routeEnvToFilter ? envValue * envToCutoffDepthSmoothed.getNextValue() : 0.0f)
             + lfoValue * lfoToCutoffDepthSmoothed.getNextValue()
-            + (currentVelocity - 1.0f) * velocityToCutoffDepthSmoothed.getNextValue()
+            + (effectiveVelocity - 1.0f) * velocityToCutoffDepthSmoothed.getNextValue()
             + stepCutoffNormSmoothed.getNextValue() * seqCutoffModRangeOctaves;
 
         const auto cutoffOctaves = cutoffLog2Smoothed.getNextValue() + cutoffModulationOctaves;
@@ -388,6 +419,28 @@ namespace
         parameters.velocityToCutoffDepthOctaves.store (velocityToCutoffDepthOctaves);
 
         voice.prepare (selfTestSampleRate); // snapshots the atomics above, jumping straight to target
+        voice.noteOn (selfTestPitchLog2Hz, velocity);
+        voice.renderNextBlock (output, numSamples);
+    }
+
+    // Item 10's own rig: same shape as renderOneNote, but adds vimEnabled -
+    // exercises A3 (main + sub oscillator drift, both read through
+    // vimEnabled once per block) and A6 (the velocity curve) together, the
+    // same "one switch, all-or-nothing" way the real panel's VIM checkbox
+    // does. saw+sub both non-zero so a sub-oscillator-only bug (A3's own
+    // split between SynthVoice and PolyBlepOscillator) couldn't hide behind
+    // an unused sub level.
+    void renderOneNoteWithVim (float velocity, bool vimEnabled, float velocityToAmpDepth,
+                                float* output, int numSamples)
+    {
+        SynthVoice voice;
+        auto& parameters = voice.getParameters();
+        parameters.envelopeDestination.store ((int) EnvelopeDestination::Filter);
+        parameters.velocityToAmpDepth.store (velocityToAmpDepth);
+        parameters.vimEnabled.store (vimEnabled ? 1 : 0);
+        parameters.subLevel.store (0.5f);
+
+        voice.prepare (selfTestSampleRate);
         voice.noteOn (selfTestPitchLog2Hz, velocity);
         voice.renderNextBlock (output, numSamples);
     }
@@ -600,6 +653,39 @@ void runLfoTempoSyncSelfTest()
     // (48000 * 0.25 * 0.5 * 2 = 6000), and independently confirms this isn't
     // one lucky BPM/division pair.
     checkHalfPeriod (240.0f, StepDivision::Eighth, 3000);
+}
+
+void runVimCharacterSelfTest()
+{
+    using Buffer = std::array<float, selfTestBlockSamples>;
+
+    //==========================================================================
+    // vimEnabled == false (the default): two independent renders, otherwise
+    // identical settings, must agree exactly - A3's drift generators
+    // producing no audible contribution when off, same as every other
+    // "byte-identical at the inert default" proof in this file.
+    {
+        Buffer a {}, b {};
+        renderOneNoteWithVim (0.7f, false, 0.5f, a.data(), selfTestBlockSamples);
+        renderOneNoteWithVim (0.7f, false, 0.5f, b.data(), selfTestBlockSamples);
+
+        jassert (peakAbs (a.data(), selfTestBlockSamples) > 0.01f); // sanity - actually sounding
+        jassert (a == b);
+    }
+
+    //==========================================================================
+    // vimEnabled == true: the render is no longer byte-identical to the off
+    // case - A3's drift and/or A6's velocity curve are reaching the signal.
+    // Velocity held below 1.0 with a real amp depth so A6's curve has
+    // something to bite into even if A3's drift happened to roll a near-zero
+    // sample this render.
+    {
+        Buffer off {}, on {};
+        renderOneNoteWithVim (0.7f, false, 0.5f, off.data(), selfTestBlockSamples);
+        renderOneNoteWithVim (0.7f, true,  0.5f, on.data(),  selfTestBlockSamples);
+
+        jassert (! (off == on));
+    }
 }
 
 #endif

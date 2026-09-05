@@ -308,19 +308,51 @@ Build/validate everything here before touching Android.
       Release, zero warnings); verified via the `cdb.exe` convention — 0
       assertion hits across all 15 self-tests — and a real launch (Debug and
       Release) with no crash.
+      **Rest of Tier 1 built 2026-09-05** (same session's follow-up, after
+      the user asked "how much to do those other things" and confirmed):
+      `OscillatorDrift` (A3 — a bounded leaky-integrator random walk, NOT a
+      free-running accumulator; the main oscillator's own instance lives in
+      `SynthVoice` as an additive-octaves pitch term, exactly like every
+      other pitch modulator there, while the sub-oscillator gets its own,
+      independently-seeded instance living INSIDE `PolyBlepOscillator`
+      itself, added as a small bounded phase offset rather than a frequency
+      offset — sub's phase is deliberately derived from the main phase, not
+      accumulated separately, so it has no frequency of its own to offset;
+      see that class's own comment for why a bounded phase wobble doesn't
+      reintroduce the free-running-accumulator beating bug that comment
+      already warns against); `curvedVelocity` (A6 — a simple `x^2` shape
+      applied to `currentVelocity` before it reaches SynthVoice's two
+      existing velocity summing points; scope narrowed to velocity's own
+      response only, not modulation-depth knob curves too — see the design
+      doc's build record for why); and `CharacterProcessor` (B4 — noise floor
+      *and* output soft-clip/asymmetric-clipping in one small output-stage
+      block, owned by `MainComponent`, applied to the mono mix right after
+      `renderVoiceBlock` and before `Chorus`). All three gated by the SAME
+      `vimEnabled` read already wired for A2 — no new controls, exactly Tier
+      1's own "one switch, no sub-parameters" design. Two design questions
+      (asked of, and settled by, the user rather than guessed at) are on
+      record in character-and-vim.md's build note: sub-oscillator drift's
+      bounded-phase-wobble approach, and A5 (component-bleed) staying
+      deferred as too vague to build safely this session.
+      Four more Debug self-tests (`runOscillatorDriftSelfTest`,
+      `runCharacterProcessorSelfTest`, and `runVimCharacterSelfTest`'s
+      integration proof through `SynthVoice`, alongside the four above) — 18
+      total now, all clean via `cdb.exe`. Builds clean (Debug + Release, zero
+      warnings); Release launched and stayed up with no crash.
       **Deliberately deferred, not forgotten** (see the design doc's own
-      scope-cut list): oscillator drift (A3), oversampling (A4),
-      component-bleed/curved-response modelling (A5/A6), output noise floor/
-      saturation/asymmetric clipping (B4), per-note randomisation (B3), mod
+      scope-cut list): A5 (component-bleed — explicitly too vague to build
+      safely, see above), oversampling (A4), per-note randomisation (B3), mod
       wheel/aftertouch routing (B5 — no MIDI CC/aftertouch plumbing exists
       yet), FM/ring-mod (B6), and Chorus/Humanise's own Rate/Depth/
       Swing-Timing-Velocity split into separate knobs (both v1 scope-cuts,
       172px of row slack already budgeted for exactly this).
-      **Human-only, not yet done**: whether the drive stage, exponential
-      envelopes, chorus and humanised timing actually sound "in the family"
-      with an SH-101/analogue reference, or just different — CLAUDE.md's
-      "what you cannot verify" section reserves that listening test for the
-      user. Also untested against MIDI hardware this session.
+      **Human-only, not yet done**: whether ANY of this — drive, exponential
+      envelopes, chorus, humanised timing, oscillator drift, the velocity
+      curve, output noise floor/saturation — actually sounds "in the family"
+      with an SH-101/analogue reference, or just different. CLAUDE.md's "what
+      you cannot verify" section reserves that listening test for the user;
+      it applies to this item more than most. Also untested against MIDI
+      hardware this session.
 
 ### Voice follow-ups (deferred out of item 2, not numbered — no reordering)
 

@@ -6,6 +6,7 @@
 #include "Glide.h"
 #include "Lfo.h"
 #include "NoiseGenerator.h"
+#include "OscillatorDrift.h"
 #include "PolyBlepOscillator.h"
 #include "VoiceParameters.h"
 #include "Vca.h"
@@ -141,6 +142,13 @@ private:
     // to feel it through (build step 6).
     static constexpr float seqCutoffModRangeOctaves = 4.0f;
 
+    // character-and-vim.md A3. BY EAR, not derived, same posture as every
+    // other shaping constant in this codebase - 2 cents is comfortably
+    // inside the doc's own "sub-cent to a couple of cents" range. mainDrift
+    // (above) produces a value nominally in roughly [-1, 1]; this scales it
+    // into the octave domain the pitch summing point already sums in.
+    static constexpr float maxMainDriftOctaves = 2.0f / 1200.0f;
+
     // log2(261.63) - middle C. Only a defined resting value for the glide
     // ramp before any note has ever played; the first note-on snaps away from
     // it, so it is never heard.
@@ -152,6 +160,15 @@ private:
     Vcf filter;
     Adsr envelope;
     Lfo lfo;
+
+    // character-and-vim.md A3 (item 10). The MAIN oscillator's own half of
+    // drift - an additive octave offset into the pitch summing point below,
+    // same shape as every other pitch modulator here. The sub-oscillator's
+    // own, independently-seeded half lives inside PolyBlepOscillator itself
+    // (see that class's own comment for why it can't be expressed the same
+    // way). Distinct seed from every other seeded generator in this
+    // codebase.
+    OscillatorDrift mainDrift { 0x3d5a91f6u };
 
     // Owns the base pitch outright - this REPLACED item 3's pitchLog2Smoothed
     // rather than layering on top of it. That smoother was a 20ms anti-zipper
@@ -308,5 +325,23 @@ void runFilterAutomationSelfTest();
     for the user - this only proves the arithmetic and the wiring.
 */
 void runLfoTempoSyncSelfTest();
+
+/*
+    Debug-only self-test, run once at startup.
+
+    Covers item 10's own wiring into SynthVoice specifically - not
+    OscillatorDrift/CharacterProcessor/curvedVelocity in isolation (their own
+    files' self-tests already do that), but that vimEnabled == false (the
+    default) renders BYTE-IDENTICAL across independent renders (A3's drift
+    generators produce no audible contribution when off, A6's velocity curve
+    is the untouched value), and that vimEnabled == true actually changes the
+    output - both mechanisms are reaching the real render path, not just
+    correct in isolation.
+
+    Whether the drift/curve actually sound like "instability"/"expressive
+    velocity" is a listening judgement CLAUDE.md's "what you cannot verify"
+    section reserves for the user - this only proves the wiring is live.
+*/
+void runVimCharacterSelfTest();
 
 #endif

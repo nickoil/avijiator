@@ -1,5 +1,7 @@
 #pragma once
 
+#include "OscillatorDrift.h"
+
 //==============================================================================
 /*
     One phase accumulator, several taps — mirrors a real SH-101 VCO, where saw,
@@ -12,6 +14,19 @@
     All three taps present: saw, pulse/PWM, and the sub-oscillator one octave
     down. Noise is a separate generator (NoiseGenerator.h), not a tap off this
     phase.
+
+    character-and-vim.md A3 (item 10) - the SUB-oscillator's own half of
+    oscillator drift lives here, not in SynthVoice with the main oscillator's.
+    Why: the sub has no independently settable frequency to add a pitch
+    offset into - its phase is derived arithmetically from the main phase ON
+    PURPOSE (see subHigh's own comment: a second free-running accumulator was
+    explicitly rejected as a source of slow beating). Giving it independent
+    drift therefore means a small, BOUNDED, slowly-wandering PHASE OFFSET
+    added directly into the derived subPhase, rather than a frequency offset
+    - see setDriftEnabled/subDrift below. This does not reintroduce the
+    rejected second-accumulator problem: OscillatorDrift is a leaky
+    integrator, not a free-running one, so it cannot slip phase against the
+    main oscillator - it can only wobble within its own bounded range.
 */
 class PolyBlepOscillator
 {
@@ -28,6 +43,13 @@ public:
 
     void setFrequency (float frequencyHz) noexcept;
     void setPulseWidth (float newPulseWidth) noexcept;
+
+    // character-and-vim.md A3. Discrete switch, called once per block from
+    // SynthVoice - same treatment as every other vimEnabled-gated switch in
+    // this codebase (Adsr::setCurveEnabled). False (the default) makes the
+    // sub-oscillator's phase offset always exactly 0.0f, byte-identical to
+    // before A3.
+    void setDriftEnabled (bool shouldBeEnabled) noexcept { subDriftEnabled = shouldBeEnabled; }
 
     Frame processSample() noexcept;
 
@@ -59,4 +81,20 @@ private:
     // phase wrap. The sub's phase is derived from this plus the main phase,
     // never accumulated separately - see processSample.
     bool subHigh = false;
+
+    // BY EAR, not derived - same posture as every other shaping constant in
+    // this codebase. A phase fraction, not a Hz/cents figure: 0.01 cycles is
+    // a small, comfortably sub-audible-as-a-static-offset wobble whose SLOW
+    // rate of change (OscillatorDrift's own multi-second time constant) is
+    // what actually reads as pitch instability - see the class comment above
+    // for why a constant offset alone would not.
+    static constexpr float maxSubDriftPhaseFraction = 0.01f;
+
+    bool subDriftEnabled = false;
+
+    // Distinct seed from whatever main-oscillator drift generator the caller
+    // (SynthVoice) owns separately, and from every other seeded generator in
+    // this codebase - distinct seeds are what make main and sub "drift
+    // against each other" rather than in lockstep.
+    OscillatorDrift subDrift { 0x8e1c3f2au };
 };
