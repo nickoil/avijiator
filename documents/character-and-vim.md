@@ -223,7 +223,7 @@ OUTPUT row's actual layout (`SynthPanel.cpp`'s `resized()`): that row uses
 so its own budget is 436px ≈ **4 cells, max**, before `designWidth` would
 need to grow — a real constraint, not a rough guess.
 
-**User's call: a curated v1 that fits in that slack, zero canvas growth.**
+**Developer's call: a curated v1 that fits in that slack, zero canvas growth.**
 Cut to the doc's own top 3 priority items (A1, A2, B1, B2 - implementation
 priority list above, items 1-4) plus the pairing trick ARP/SEQ's own On/Hold
 and On/Record cells already establish:
@@ -362,7 +362,7 @@ via `cdb.exe`. Builds clean (Debug + Release, zero warnings); both configs
 launch and stay up with no crash.
 
 **Not verified this session**: whether any of this sounds right — CLAUDE.md's
-"what you cannot verify" section reserves that for the user, and it applies
+"what you cannot verify" section reserves that for the developer, and it applies
 here more than most items (this whole doc is about a listening-test-driven
 character). MIDI hardware end-to-end also untested (none available).
 
@@ -370,9 +370,9 @@ character). MIDI hardware end-to-end also untested (none available).
 
 ## Rest of Tier 1 — build record (session of 2026-09-05)
 
-Same session, later on: the user asked what VIM currently does, then how much
+Same session, later on: the developer asked what VIM currently does, then how much
 work the rest of Tier 1 was, then said to build it. Two design questions came
-up along the way and were put to the user rather than guessed at:
+up along the way and were put to the developer rather than guessed at:
 
 1. **A3's sub-oscillator drift.** `PolyBlepOscillator.cpp` derives the
    sub-oscillator's phase arithmetically from the main phase ON PURPOSE — a
@@ -389,7 +389,7 @@ up along the way and were put to the user rather than guessed at:
    alternatives offered (sub tracks main's drift value; skip sub drift
    entirely) as the one that actually matches the spec's "against each
    other" without the risk.
-2. **A5 (component-bleed).** Left deferred, per the user's choice — the doc's
+2. **A5 (component-bleed).** Left deferred, per the developer's choice — the doc's
    own examples ("envelope faintly affecting cutoff even when not routed")
    arguably contradict existing, deliberate behaviour (Envelope Destination =
    Amp means the envelope does not touch the filter, full stop), and the doc
@@ -457,3 +457,65 @@ the velocity curve, and the noise floor/saturation are all explicitly
 during sustained playing, not by soloing them"), which makes them the
 hardest items in this whole doc to judge by a quick listen. MIDI hardware
 still untested.
+
+---
+
+## A1 (Drive) — revised three times (session of 2026-09-06)
+
+The developer listened and pushed back, three times, on what A1 actually did:
+
+1. "Drive to drive the filter is pointless... I would like to replace it
+   with a drive that is low gain distortion." The original design (drive
+   INSIDE `Vcf`'s feedback loop, per A1's own spec text) was technically
+   live and self-tested, but never read as distortion - only as a subtle
+   cutoff/resonance colouration. Replaced with a plain pre-filter stage
+   (`Source/DSP/Drive.h`), `Vcf.cpp` reverted to exactly its pre-A1 state.
+2. "This sounds similar to how it did before. I am after an effect like a
+   distortion pedal whereby the signal gets louder and dirtier." The FIRST
+   replacement kept the original design's makeup-gain instinct - crossfading
+   toward a fixed-hardness `tanh` shaper rather than actually raising input
+   gain - which kept the level roughly constant instead of climbing with
+   drive. Wrong instinct, carried over from A1's original "colour without
+   getting louder" framing without re-examining whether that framing still
+   applied to a genuine distortion stage.
+3. "This still does not sound like a grungy distortion pedal. If anything it
+   sounds cleaner when on... is it now independent of the filters?" It
+   wasn't - it was still pre-filter, and that was itself the bug: the VCF
+   runs immediately after Drive, so whenever cutoff was not wide open, the
+   filter removed exactly the harmonics Drive had just added - the added
+   distortion was being filtered back out, and `tanh`'s edge-rounding on top
+   of that could net out sounding smoother rather than dirtier. This is the
+   one of the three that math/self-tests could not have caught: every
+   existing self-test (exact bypass at 0, bounded, louder-with-drive) is
+   about the DRIVE FUNCTION in isolation and stayed true regardless of where
+   it sits in the chain - only a listening test at a realistic (not wide
+   open) cutoff setting reveals a placement bug like this, which is exactly
+   the "what you cannot verify" boundary CLAUDE.md draws.
+
+**Settled design**: real gain-into-clip, no makeup gain -
+`tanh(input * driveGain)` used AS-IS, `driveGain` up to 10x - applied AFTER
+the filter, immediately before the VCA, not before it. "A pedal at the
+output" rather than "drive into the filter": whatever the VCF decided to
+pass always gets driven, independent of cutoff/resonance position. The
+signal gets louder AND dirtier together as `driveAmount` rises, which is the
+actual defining trade of an overdrive/distortion pedal (as opposed to a
+fixed-level "saturator" or "exciter"). `driveAmount <= 0` is an explicit
+early-return bypass - exact regardless of input level - and nothing beyond
+that is required to be smooth as the knob first moves off zero; real drive
+pedals aren't silky at the bottom of their range either. A new self-test
+(`runDriveIntegrationSelfTest`'s third case) specifically renders with
+cutoff mostly CLOSED and asserts drive still makes the output louder -
+proving the fix, not just asserting the old (still-true) properties again.
+
+Full technical detail (files touched, the rename, the self-test bug this
+turned up, self-test counts) is in `documents/TODO.md`'s item 10 entry,
+2026-09-06 note - not duplicated here to keep this doc's own build record
+from drifting out of sync with which file is authoritative for what actually
+shipped.
+
+**Lesson for future Tier 2 "amount" knobs in this doc**: "inert at 0,
+otherwise smoothly self-limiting" (the convention every OTHER depth knob in
+this codebase correctly follows) is not automatically the right shape for a
+knob whose entire job is to change PERCEIVED LOUDNESS as well as timbre -
+worth asking "should this get louder" explicitly next time, rather than
+defaulting to the makeup-gained shape out of habit.

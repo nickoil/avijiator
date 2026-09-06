@@ -593,7 +593,7 @@ glide.snapToTarget();          // pitch SNAPS
 envelope.noteOn();             // envelope ALWAYS retriggers
 ```
 
-Two consequences, both deliberate and both worth telling the user rather than
+Two consequences, both deliberate and both worth telling the developer rather than
 leaving to be discovered:
 
 1. **Glide Time has no audible effect at all while the arp is on.** Correct
@@ -726,7 +726,7 @@ below the threshold at which it is distinguishable from a human's own timing.
   against a clock's second hand. Catches a division-table error or a
   factor-of-two, not drift.
 
-### Taste — the user's call alone
+### Taste — the developer's call alone
 
 Whether up-down should repeat endpoints; whether random should be allowed to
 repeat; whether Gate 0.5 is the right default; whether these are the right seven

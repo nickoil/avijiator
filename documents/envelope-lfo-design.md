@@ -313,7 +313,7 @@ Same instruction pattern as item 2 — step names and numbers are interchangeabl
   (same phase) — if they don't, `processSample()` is being called twice per sample
   somewhere.
 
-### Taste — the user's call alone
+### Taste — the developer's call alone
 
 Attack/decay/release feel, whether the default Amp destination is the right
 starting point, whether LFO rate range covers what's actually useful, whether the

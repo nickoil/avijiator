@@ -196,10 +196,11 @@ private:
     Smoothed velocityToAmpDepthSmoothed;
     Smoothed velocityToCutoffDepthSmoothed;
 
-    // character-and-vim.md A1 (item 10). Smoothed like every other depth
-    // knob here - an unsmoothed jump would thump the filter's feedback loop
-    // the same way an unsmoothed resonance jump does.
-    Smoothed filterDriveAmountSmoothed;
+    // character-and-vim.md A1 (item 10) - a pre-filter drive/distortion
+    // stage (Source/DSP/Drive.h), applied to the oscillator mix. Smoothed
+    // like every other depth knob here - an unsmoothed jump into a nonlinear
+    // shaper would click.
+    Smoothed driveAmountSmoothed;
 
     // Item 7 build step 5. NOT part of the lastXxx-guarded apply() list below
     // - setStepFilterModulation pushes these two directly via setTargetValue,
@@ -227,7 +228,7 @@ private:
     float lastLfoToCutoffDepth = 0.0f;
     float lastVelocityToAmpDepth = 0.0f;
     float lastVelocityToCutoffDepth = 0.0f;
-    float lastFilterDriveAmount = 0.0f;
+    float lastDriveAmount = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthVoice)
 };
@@ -343,5 +344,18 @@ void runLfoTempoSyncSelfTest();
     section reserves for the user - this only proves the wiring is live.
 */
 void runVimCharacterSelfTest();
+
+/*
+    Debug-only self-test, run once at startup.
+
+    Covers A1's revised drive stage (Source/DSP/Drive.h) reaching the real
+    render path - Drive::processSample's own file proves the pure function in
+    isolation, this proves SynthVoice actually calls it with the smoothed
+    driveAmount, on the oscillator mix, ahead of the filter. driveAmount == 0
+    (the default) renders byte-identical across independent renders; turned
+    up, the output is no longer byte-identical to the default - not a dead
+    parameter.
+*/
+void runDriveIntegrationSelfTest();
 
 #endif

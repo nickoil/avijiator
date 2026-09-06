@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "CharacterProcessor.h"
+#include "Drive.h"
 
 void SynthVoice::prepare (double newSampleRate)
 {
@@ -29,7 +30,7 @@ void SynthVoice::prepare (double newSampleRate)
     lfoToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
     velocityToAmpDepthSmoothed.reset (newSampleRate, rampSeconds);
     velocityToCutoffDepthSmoothed.reset (newSampleRate, rampSeconds);
-    filterDriveAmountSmoothed.reset (newSampleRate, rampSeconds);
+    driveAmountSmoothed.reset (newSampleRate, rampSeconds);
 
     // Not part of snapshotParameters' apply() list below - setStepFilterModulation
     // drives these directly - but still need their ramp step-size machinery
@@ -158,7 +159,7 @@ void SynthVoice::snapshotParameters (bool jumpImmediately) noexcept
     apply (lfoToCutoffDepthSmoothed, lastLfoToCutoffDepth, parameters.lfoToCutoffDepthOctaves.load (std::memory_order_relaxed));
     apply (velocityToAmpDepthSmoothed, lastVelocityToAmpDepth, parameters.velocityToAmpDepth.load (std::memory_order_relaxed));
     apply (velocityToCutoffDepthSmoothed, lastVelocityToCutoffDepth, parameters.velocityToCutoffDepthOctaves.load (std::memory_order_relaxed));
-    apply (filterDriveAmountSmoothed, lastFilterDriveAmount, parameters.filterDriveAmount.load (std::memory_order_relaxed));
+    apply (driveAmountSmoothed, lastDriveAmount, parameters.driveAmount.load (std::memory_order_relaxed));
 }
 
 void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
@@ -328,10 +329,23 @@ void SynthVoice::renderNextBlock (float* output, int numSamples) noexcept
         const auto resonance01 = juce::jlimit (0.0f, 1.0f,
             resonanceSmoothed.getNextValue() + stepResonanceNormSmoothed.getNextValue());
 
-        const auto filtered = filter.processSample (mix, cutoffOctaves, resonance01,
-                                                     filterDriveAmountSmoothed.getNextValue());
+        const auto filtered = filter.processSample (mix, cutoffOctaves, resonance01);
 
-        output[i] = Vca::processSample (filtered, outputLevelSmoothed.getNextValue(), amplitudeModulation);
+        // character-and-vim.md A1, REVISED A THIRD TIME - a plain drive/
+        // distortion stage (Source/DSP/Drive.h), applied AFTER the filter,
+        // just before the VCA - "a pedal at the output", not "drive into the
+        // filter". Moved here from pre-filter (where it briefly sat) because
+        // pre-filter, the VCF could remove exactly the harmonics Drive had
+        // just added if cutoff was not wide open - the user reported it
+        // reading as CLEANER, not dirtier, once turned on, which is the
+        // signature of that placement bug. Post-filter, whatever the filter
+        // decided to pass always gets driven - independent of cutoff/
+        // resonance settings, matching the "pedal in front of the amp"
+        // mental model this control is meant to be. Exactly `filtered` at
+        // driveAmount == 0 - see Drive::processSample's own explicit bypass.
+        const auto driven = Drive::processSample (filtered, driveAmountSmoothed.getNextValue());
+
+        output[i] = Vca::processSample (driven, outputLevelSmoothed.getNextValue(), amplitudeModulation);
     }
 
     // Safety net. A single non-finite sample poisons the filter's integrator
@@ -685,6 +699,80 @@ void runVimCharacterSelfTest()
         renderOneNoteWithVim (0.7f, true,  0.5f, on.data(),  selfTestBlockSamples);
 
         jassert (! (off == on));
+    }
+}
+
+void runDriveIntegrationSelfTest()
+{
+    using Buffer = std::array<float, selfTestBlockSamples>;
+
+    // One voice, one note, saw+pulse+sub all non-zero so the mix genuinely
+    // has energy for Drive to act on. cutoffLog2Hz is a PARAMETER, not fixed
+    // here - see the third block below, which is the entire reason this
+    // takes one.
+    const auto render = [] (float driveAmount, float cutoffLog2Hz, float* output, int numSamples)
+    {
+        SynthVoice voice;
+        auto& parameters = voice.getParameters();
+        parameters.envelopeDestination.store ((int) EnvelopeDestination::Amp);
+        parameters.attackSeconds.store (0.001f);
+        parameters.sustainLevel.store (0.8f);
+        parameters.sawLevel.store (0.6f);
+        parameters.pulseLevel.store (0.3f);
+        parameters.subLevel.store (0.3f);
+        parameters.cutoffLog2Hz.store (cutoffLog2Hz);
+        parameters.driveAmount.store (driveAmount);
+
+        voice.prepare (selfTestSampleRate);
+        voice.noteOn (selfTestPitchLog2Hz, 1.0f);
+        voice.renderNextBlock (output, numSamples);
+    };
+
+    constexpr float cutoffWideOpen = 14.0f; // ~16kHz
+
+    //==========================================================================
+    // driveAmount == 0 (the default): byte-identical across independent
+    // renders.
+    {
+        Buffer a {}, b {};
+        render (0.0f, cutoffWideOpen, a.data(), selfTestBlockSamples);
+        render (0.0f, cutoffWideOpen, b.data(), selfTestBlockSamples);
+
+        jassert (peakAbs (a.data(), selfTestBlockSamples) > 0.01f); // sanity - actually sounding
+        jassert (a == b);
+    }
+
+    //==========================================================================
+    // driveAmount turned up, cutoff wide open: no longer byte-identical to
+    // the default - Drive is actually reaching the signal. Also LOUDER, not
+    // just different - Drive.cpp's own self-test proves this of the pure
+    // function; this proves it survives all the way through the filter too,
+    // the specific regression the previous (makeup-gained) build had.
+    {
+        Buffer off {}, on {};
+        render (0.0f, cutoffWideOpen, off.data(), selfTestBlockSamples);
+        render (1.0f, cutoffWideOpen, on.data(), selfTestBlockSamples);
+
+        jassert (! (off == on));
+        jassert (peakAbs (on.data(), selfTestBlockSamples) > peakAbs (off.data(), selfTestBlockSamples));
+    }
+
+    //==========================================================================
+    // THE REGRESSION THIS MOVE FIXES: cutoff mostly CLOSED. When Drive lived
+    // pre-filter, this exact scenario is where it went quietly wrong - the
+    // filter removed the harmonics Drive had just added, so turning drive up
+    // read as no dirtier (sometimes even cleaner) rather than more. Post-
+    // filter, driveAmount must still make the output louder here, same as
+    // wide open - proving the effect no longer depends on cutoff position.
+    {
+        constexpr float cutoffMostlyClosed = 8.0f; // ~256Hz - well below the saw/pulse/sub's own harmonics
+
+        Buffer off {}, on {};
+        render (0.0f, cutoffMostlyClosed, off.data(), selfTestBlockSamples);
+        render (1.0f, cutoffMostlyClosed, on.data(), selfTestBlockSamples);
+
+        jassert (peakAbs (off.data(), selfTestBlockSamples) > 0.01f); // sanity - actually sounding
+        jassert (peakAbs (on.data(), selfTestBlockSamples) > peakAbs (off.data(), selfTestBlockSamples));
     }
 }
 

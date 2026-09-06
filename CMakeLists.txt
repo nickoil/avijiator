@@ -51,6 +51,7 @@ target_sources(Avijiator
         Source/DSP/PolyBlepOscillator.cpp
         Source/DSP/SynthVoice.cpp
         Source/DSP/Vcf.cpp
+        Source/DSP/Drive.cpp
         Source/DSP/Adsr.cpp
         Source/DSP/Chorus.cpp
         Source/DSP/OscillatorDrift.cpp

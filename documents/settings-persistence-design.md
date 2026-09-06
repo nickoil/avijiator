@@ -15,14 +15,14 @@ here.
 
 TODO.md's own writeup left three things open: (a) file format, (b) where
 shipped presets live, (c) build-order interaction with tempo-sync. Settled
-this session (user decisions, not this doc's own call), plus two more that
+this session (developer decisions, not this doc's own call), plus two more that
 came up during design:
 
 - **(a) Format: `juce::XmlElement`.** Matches the only existing serialization
   precedent in this codebase (`MainComponent`'s device-settings code, see
   section 3). `juce::ValueTree` has zero uses anywhere in `Source/` — not
   introduced here for no benefit.
-- **(b) Factory presets live in the user's settings folder, written at first
+- **(b) Factory presets live in the developer's settings folder, written at first
   launch — not embedded `BinaryData`.** Editable in place, no rebuild to tweak
   a preset; revisit embedding only if this app is ever actually distributed
   (`architecture.md`'s licensing section is explicit that nothing there
@@ -51,11 +51,11 @@ came up during design:
 |---|---|---|
 | Serialization format | `juce::XmlElement` | Matches `MainComponent`'s existing `ApplicationProperties`/`createStateXml()` idiom; no second serialization pattern introduced |
 | Two-tier model | Tier A (silent session-state auto-restore) + Tier B (named presets), sharing one serialization function | Tier A is just an anonymous preset — building two independent save/load paths would duplicate the one piece of code worth getting right |
-| Factory presets | User folder, written at first launch | No rebuild to tweak a preset; embedding is a distribution-time concern this project hasn't reached (`architecture.md:22-25`) |
+| Factory presets | Developer folder, written at first launch | No rebuild to tweak a preset; embedding is a distribution-time concern this project hasn't reached (`architecture.md:22-25`) |
 | Latch scope | Same serialized data for both tiers, no special-casing | Simpler mental model; a chord latched when the app last closed is exactly as "current state" as any knob position |
-| Preset-UI scope | Designed and built in this item | User's explicit call — ships as one complete feature rather than a backend with no front door |
-| Preset-UI shape | Two header-row buttons (Save, Load), each opening its own dialog; nothing added to the fixed canvas | User's explicit call, settled after a dropdown-at-top-of-canvas framing was floated and dropped — see section 6 |
-| Duplicate preset names | Save is rejected inline, no overwrite, no auto-suffix | User's explicit call — forces an unambiguous name per preset rather than silent overwrite or piling up auto-numbered duplicates |
+| Preset-UI scope | Designed and built in this item | Developer's explicit call — ships as one complete feature rather than a backend with no front door |
+| Preset-UI shape | Two header-row buttons (Save, Load), each opening its own dialog; nothing added to the fixed canvas | Developer's explicit call, settled after a dropdown-at-top-of-canvas framing was floated and dropped — see section 6 |
+| Duplicate preset names | Save is rejected inline, no overwrite, no auto-suffix | Developer's explicit call — forces an unambiguous name per preset rather than silent overwrite or piling up auto-numbered duplicates |
 | Version/rename policy | Best-effort by name, no migration shims, no warning | See section 2 — accepted trade-off for a fast-evolving solo project, walked through concretely against the tempo-sync rename before being settled |
 | Parameter enumeration | Generic, over `SynthPanel`'s existing spec tables via member-pointers | Survives future field renames (tempo-sync's `masterTempoBpm` merge) with zero serializer changes, instead of a hand-maintained field list that silently drifts |
 | Arp-latch snapshot | Plain per-slot atomics on `Arpeggiator`, consumed at the top of the next `process()` block | Matches this codebase's existing "torn read is harmless" convention (step-sequencer arrays) and "check a flag at block boundary" convention (`VoiceOwner` hand-over) rather than inventing new machinery for a rare, one-shot event |
@@ -132,16 +132,16 @@ the app is interactive), saved in the destructor alongside
 `deviceManager.createStateXml()`, via `appProperties.saveIfNeeded()`. No new
 UI.
 
-**Tier B — named presets.** User-facing save-as/load/browse/delete, backed by
+**Tier B — named presets.** Developer-facing save-as/load/browse/delete, backed by
 one file per preset (not one big blob) in a new `Presets/` folder alongside
 the existing `ApplicationProperties` settings folder — independently
-shareable/deletable, and consistent with "user-folder, editable in place"
+shareable/deletable, and consistent with "developer-folder, editable in place"
 from section 1. UI shape: see section 6.
 
 Both tiers call the **same** `toXml(const VoiceParameters&, const
 Arpeggiator&)` / `fromXml(const juce::XmlElement&, VoiceParameters&,
 Arpeggiator&)` pair (section 4) — Tier A is simply an anonymous preset saved
-under a fixed key instead of a user-chosen filename.
+under a fixed key instead of a developer-chosen filename.
 
 ---
 
@@ -241,7 +241,7 @@ already documented for the step-sequencer arrays (`VoiceParameters.h:236-238`)
 — a save reading a half-updated latch mid-change is no worse than a save
 catching two knobs mid-turn, and no heavier double-buffer/generation-counter
 machinery (which `StepGrid`'s live 30Hz polling would justify) is needed for
-a rare, user-initiated, one-shot read.
+a rare, developer-initiated, one-shot read.
 
 **Load direction (message thread → audio).** A new public method, e.g.
 `Arpeggiator::requestLatchLoad(const LatchSnapshot&)`, called from the
@@ -292,7 +292,7 @@ Two buttons, **Save** and **Load**, added to `SynthPanel`'s existing header
 row immediately to the left of `audioSettingsButton`
 (`SynthPanel.h:471`, `SynthPanel.cpp:861-868,928-933`) — same row, same
 right-aligned header strip the Audio Settings button already occupies, so
-**nothing grows on the canvas** (user's explicit call — this supersedes an
+**nothing grows on the canvas** (developer's explicit call — this supersedes an
 earlier "dropdown at the top of the page" framing floated mid-session, which
 would have needed canvas room and was dropped). Each button opens its own
 `juce::DialogWindow`, reusing the same mechanism `MainComponent`'s existing
@@ -303,7 +303,7 @@ rather than one combined modal:
   action. **Names must be unique**: if the entered name matches an existing
   preset file, the dialog rejects inline (e.g. "A preset named 'X' already
   exists — choose a different name") and stays open — no silent overwrite,
-  no auto-suffixing (user's explicit call).
+  no auto-suffixing (developer's explicit call).
 - **Load** → a dialog with a scrollable list of existing preset names, one
   row each, with a Load action and a Delete action per row. Delete lives
   here, not on the Save dialog or anywhere in the main canvas.
@@ -315,7 +315,7 @@ starting shape (name field; scrollable list with load/delete per row) is a
 reasonable first pass, not a locked mockup.
 
 **Built:** the pixel-level placement this section left open settled as
-exactly between `autovijiButton` and `audioSettingsButton` (user's explicit
+exactly between `autovijiButton` and `audioSettingsButton` (developer's explicit
 call) — left-to-right, Autoviji, Save, Load, Audio Settings. Both dialogs'
 content and the factory-bank writer live in `Source/Presets/
 PresetBrowserUI.h/.cpp`, a free-function namespace rather than a class -
@@ -337,7 +337,7 @@ once, at construction, via `attachKnob`/`attachChoice`/`attachToggle`'s own
 one-time seed call. Nothing was pulling a widget's displayed position back
 from the atomic on any LATER external change, because until this item the
 only such change was `masterOctaveShift` via comma/period (`refreshOctaveReadout`,
-documents/note-handling-design.md section 7). A user bug report (Load not
+documents/note-handling-design.md section 7). A developer bug report (Load not
 lighting the SEQUENCER On toggle, despite the sequencer correctly being
 about to run) surfaced that a preset load is a second, much larger case of
 exactly that same gap - every field, not one.
@@ -389,7 +389,7 @@ serializer/UI/factory-bank code across the flat `Source/` root).
 
 ## 9. Factory preset bank
 
-A curated starting set, written to the same user-folder `Presets/` location
+A curated starting set, written to the same developer-folder `Presets/` location
 (section 3) at first launch if that folder doesn't yet exist — not embedded
 `BinaryData`, per section 1's settled decision. Content (which patches, how
 many) is implementation-time work, not fixed here.
@@ -458,7 +458,7 @@ discipline as every other self-test in this codebase
    restores it, provable via the self-test's second scenario.
 4. **Preset browser UI.** Section 6's dialog — save-as/load/list/delete.
    **Done when**: Tier B is usable end-to-end from the panel.
-5. **Factory preset bank.** Section 9 — a curated set written to the user
+5. **Factory preset bank.** Section 9 — a curated set written to the developer
    folder on first launch.
 6. **Self-tests.** Section 10, both scenarios, verified clean via `cdb.exe`
    per this project's headless-verification convention.

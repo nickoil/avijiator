@@ -32,9 +32,10 @@
       stereo widening after.
 */
 
-// A1's driveSaturate lives on Vcf (it IS the filter). This is the OTHER
-// curve this item adds - velocity's own response shape, character-and-vim.md
-// A6: "small deltas at low values are less audible than the same delta at
+// A1's drive stage lives in Source/DSP/Drive.h now, as a pre-filter stage -
+// see that file's own comment for its revision history. This is a DIFFERENT
+// curve - velocity's own response shape, character-and-vim.md A6: "small
+// deltas at low values are less audible than the same delta at
 // high values" is a convex curve; x^2 is the simplest one that satisfies it
 // while leaving both endpoints (0 -> 0, 1 -> 1) exactly where they already
 // were, so a full-velocity note is unaffected either way. BY EAR, not

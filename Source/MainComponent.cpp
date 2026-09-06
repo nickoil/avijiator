@@ -200,10 +200,12 @@ MainComponent::MainComponent()
     // reach its target rather than asymptoting forever.
     runAdsrCurveSelfTest();
 
-    // Item 10, A1: Vcf::driveSaturate must be exactly softClip(x) at
-    // driveAmount == 0, and must audibly change the filter's output once
-    // turned up.
-    runVcfDriveSelfTest();
+    // Item 10, A1 (revised) - Drive::processSample must be exact identity at
+    // driveAmount == 0 (Drive.cpp's own self-test), and SynthVoice must
+    // actually reach it with the smoothed value, on the mix, ahead of the
+    // filter (this one).
+    runDriveSelfTest();
+    runDriveIntegrationSelfTest();
 
     // Item 10, B2: the arp's and the sequencer's humanise onset-delay
     // scheduling (the "third deadline") - byte-identical at humaniseAmount

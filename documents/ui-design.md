@@ -27,7 +27,7 @@ something has gone wrong — stop and re-read this line.
 
 ## 1. Decisions and why
 
-Settled with the user before writing this doc. Recorded here so a later session
+Settled with the developer before writing this doc. Recorded here so a later session
 does not reopen them.
 
 | Decision | Choice | Reasoning |
@@ -36,7 +36,7 @@ does not reopen them.
 | Visual style | **Clean modern flat** — dark, not skeuomorphic grey hardware | Less drawing code than a photoreal panel, and reads better small. `architecture.md`'s "familiar layout" is about *arrangement*, which is honoured; it does not require a fake aluminium texture |
 | Scaling | **Fixed design canvas + global `AffineTransform` scale** | One layout, authored once, scaled to fit whatever the window or screen is. The only approach that ports to Android without designing every breakpoint twice |
 | Item 7 sequencer | **Reserve an empty region now** | Costs nothing today and saves a layout redesign when item 7 lands |
-| Arp params stay in `VoiceParameters` | **Yes, leave them** | [VoiceParameters.h](../Source/DSP/VoiceParameters.h) flags item 6 as the place to revisit this. The answer is no: splitting buys purity and costs a second spec table for zero user-visible gain. That comment gets updated to record the decision, not deleted |
+| Arp params stay in `VoiceParameters` | **Yes, leave them** | [VoiceParameters.h](../Source/DSP/VoiceParameters.h) flags item 6 as the place to revisit this. The answer is no: splitting buys purity and costs a second spec table for zero developer-visible gain. That comment gets updated to record the decision, not deleted |
 
 ---
 

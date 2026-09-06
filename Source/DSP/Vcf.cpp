@@ -4,11 +4,6 @@
 
 #include <juce_core/juce_core.h>
 
-#if JUCE_DEBUG
- #include <array>
- #include <span>
-#endif
-
 void Vcf::prepare (double newSampleRate) noexcept
 {
     sampleRate = newSampleRate;
@@ -40,17 +35,6 @@ float Vcf::softClip (float x) noexcept
     return x;
 }
 
-float Vcf::driveSaturate (float x, float driveAmount) noexcept
-{
-    // driveAmount == 0 -> driveGain == 1.0f exactly, so this reduces to
-    // softClip(x) / 1.0f - byte-identical to softClip(x) alone. Above 0, x is
-    // pushed harder into the SAME curve before the makeup division pulls the
-    // added gain back out, so the shape saturates more without simply
-    // getting louder.
-    const auto driveGain = 1.0f + driveAmount * (maxDriveGain - 1.0f);
-    return softClip (x * driveGain) / driveGain;
-}
-
 TptSvfCoefficients Vcf::makeCoefficients (float cutoffHz) const noexcept
 {
     // Prewarped integrator gain - maps the analogue cutoff onto the bilinear
@@ -65,7 +49,7 @@ TptSvfCoefficients Vcf::makeCoefficients (float cutoffHz) const noexcept
     return c;
 }
 
-float Vcf::processSample (float input, float cutoffLog2Hz, float resonance01, float driveAmount) noexcept
+float Vcf::processSample (float input, float cutoffLog2Hz, float resonance01) noexcept
 {
     const auto cutoffHz = juce::jlimit (minCutoffHz, upperCutoffHz, std::exp2 (cutoffLog2Hz));
     const auto c = makeCoefficients (cutoffHz);
@@ -94,20 +78,16 @@ float Vcf::processSample (float input, float cutoffLog2Hz, float resonance01, fl
     const auto solved = (cascadeGain * in + cascadeState) / (1.0f + k * cascadeGain);
 
     // Run the stages forward with the solved loop input, so the integrator
-    // states advance consistently with the value just computed. driveSaturate
+    // states advance consistently with the value just computed. The soft clip
     // is what stops the loop running away once k is past the self-oscillation
-    // threshold - same stability role softClip always had - AND, at
-    // driveAmount > 0, colours the sound at normal levels too (A1): pushed
-    // harder into the same curve, cutoff/resonance interaction turns
-    // nonlinear before the loop is anywhere near self-oscillating.
+    // threshold: it caps the energy entering the stages, so the oscillation
+    // settles into a bounded limit cycle instead of diverging to NaN.
     //
-    // At driveAmount == 0 this is exactly softClip(in - k*solved) - see
-    // driveSaturate's own comment - so below the clip threshold it is exactly
-    // `in - k * solved` and the forward pass reproduces `solved` to within
-    // rounding, same as before A1 existed. Above it (either from resonance
-    // alone or with drive pushing harder) the two legitimately differ - which
-    // is the point - so there is no equality assert here.
-    const auto stageInput = driveSaturate (in - k * solved, driveAmount);
+    // Below the clip threshold this is exactly `in - k * solved` and the
+    // forward pass reproduces `solved` to within rounding. Above it the two
+    // legitimately differ - which is the point - so there is no equality
+    // assert here.
+    const auto stageInput = softClip (in - k * solved);
     const auto result = stage2.processLowpass (stage1.processLowpass (stageInput, c), c);
 
     // Finiteness is the invariant that actually matters: a single non-finite
@@ -117,61 +97,3 @@ float Vcf::processSample (float input, float cutoffLog2Hz, float resonance01, fl
 
     return result;
 }
-
-//==============================================================================
-#if JUCE_DEBUG
-
-namespace
-{
-    // A real sweep, not a single static sample: a decaying saw-ish input so
-    // the filter's own state (both integrators, plus the k*solved feedback
-    // term) actually moves through a range of levels, the same reasoning
-    // every other "byte-identical at the inert default" test in this
-    // codebase gives for driving a real signal through rather than a fixed
-    // number.
-    void renderSweep (float driveAmount, float resonance01, std::span<float> output) noexcept
-    {
-        Vcf filter;
-        filter.prepare (48000.0);
-
-        for (size_t i = 0; i < output.size(); ++i)
-        {
-            // A cheap decaying "buzz" - not a real oscillator, just something
-            // with harmonic content and a level that moves, which is all this
-            // needs to push the filter's nonlinearity around.
-            const auto t = (float) i;
-            const auto raw = std::fmod (t * 0.1f, 1.0f) * 2.0f - 1.0f;
-            const auto input = raw * std::exp (-t * 0.0002f);
-
-            output[i] = filter.processSample (input, 10.0f, resonance01, driveAmount);
-        }
-    }
-}
-
-void runVcfDriveSelfTest()
-{
-    constexpr int numSamples = 2000;
-
-    //==========================================================================
-    // driveAmount == 0 is byte-identical across a real sweep, at both a low
-    // and a high resonance - driveSaturate must not perturb the existing
-    // stability-only softClip behaviour at all when off.
-    for (const float resonance : { 0.1f, 0.95f })
-    {
-        std::array<float, numSamples> a {}, b {};
-        renderSweep (0.0f, resonance, a);
-        renderSweep (0.0f, resonance, b);
-        jassert (a == b); // two independent renders at driveAmount == 0 agree exactly
-    }
-
-    //==========================================================================
-    // driveAmount turned up changes the output - the term reaches the loop.
-    {
-        std::array<float, numSamples> noDrive {}, fullDrive {};
-        renderSweep (0.0f, 0.3f, noDrive);
-        renderSweep (1.0f, 0.3f, fullDrive);
-        jassert (! (noDrive == fullDrive));
-    }
-}
-
-#endif

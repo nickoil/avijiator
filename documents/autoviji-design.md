@@ -37,7 +37,7 @@ the same call, so the panel never shows stale state after a click.
 - **1-in-8 gate-off, not 1-in-12.** Also an ear-driven change from the
   original 1-in-12 - a denser pattern read as more "off" than intended at
   the wider odds.
-- **Cutoff lane, not the main knob.** Resolved explicitly with the user
+- **Cutoff lane, not the main knob.** Resolved explicitly with the developer
   before building: amber already means "arp playhead / step value" in the
   sequencer grid ([SynthPanel.cpp](SynthPanel.cpp)'s `StepCell::paint`,
   see `PanelLookAndFeel.h`'s `accentAlt` comment), and the per-step Cutoff

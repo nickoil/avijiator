@@ -6,6 +6,7 @@
 #include "Arpeggiator.h"
 #include "DSP/CharacterProcessor.h"
 #include "DSP/Chorus.h"
+#include "DSP/Drive.h"
 #include "DSP/NoteEvent.h"
 #include "DSP/NoteStack.h"
 #include "DSP/StepClock.h"

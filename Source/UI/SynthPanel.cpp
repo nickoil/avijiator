@@ -324,11 +324,14 @@ const ToggleSpec SynthPanel::seqToggleSpecs[numSeqToggles] =
 // the same "0 = no effect" convention every other depth knob in this file
 // already uses (envToCutoffDepthOctaves, lfoToPitchDepthOctaves, ...), not a
 // new pattern. Drive is knob-only, no separate toggle - the doc's own
-// scope-cut note for why.
+// scope-cut note for why. Drive's target REVISED from filterDriveAmount to
+// driveAmount when A1 moved from an in-filter-feedback-loop stage to a
+// pre-filter drive/distortion one (Source/DSP/Drive.h) - the knob itself,
+// its cell, and its display name are all unchanged.
 const KnobSpec SynthPanel::characterKnobSpecs[numCharacterKnobs] =
 {
-    { "Drive",     0.0, 1.0, 0.0, false, 0.0, "", &VoiceParameters::filterDriveAmount },
-    { "Humanise",  0.0, 1.0, 0.0, false, 0.0, "", &VoiceParameters::humaniseAmount    },
+    { "Drive",     0.0, 1.0, 0.0, false, 0.0, "", &VoiceParameters::driveAmount    },
+    { "Humanise",  0.0, 1.0, 0.0, false, 0.0, "", &VoiceParameters::humaniseAmount },
 };
 
 // Off on first load, same reasoning as every other "instrument must play

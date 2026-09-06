@@ -200,7 +200,7 @@ settled there, recorded here so a later session doesn't reopen them:
   landscape mockup artboard, and the number Stage B's touch pass inherits
 - Arp performance params (pattern, division, tempo, gate, hold) **stay in
   `VoiceParameters`** rather than splitting into a separate struct — the
-  split would buy purity and cost a second spec table for no user-visible
+  split would buy purity and cost a second spec table for no developer-visible
   gain
 - The step sequencer's panel region (item 7) is **reserved and empty**, not
   built — costs nothing now, avoids a layout redesign later

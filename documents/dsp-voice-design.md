@@ -537,7 +537,7 @@ until the app is restarted.
   downward-moving birdie tones against the upward sweep; PolyBLEP gives none. Listening
   for a specific artefact's presence or absence, not for whether it sounds good.
 
-**Taste — the user's call alone:** whether it's "in the family" with an SH-101 (the
+**Taste — the developer's call alone:** whether it's "in the family" with an SH-101 (the
 actual acceptance criterion), whether the resonance taper feels right, whether the
 bass-loss compensation is set well, whether smoothing feels laggy, whether PWM extremes
 sound right.

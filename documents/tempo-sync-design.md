@@ -7,7 +7,7 @@ entry, not yet numbered). Written before implementation, same discipline as
 
 `architecture.md`'s "Tempo sync" section and TODO.md's own entry have
 described this feature since item 7 landed, with three explicitly open
-questions. Settled this session (user decision, not this doc's own call):
+questions. Settled this session (developer decision, not this doc's own call):
 
 - **(a) One shared dial.** `arpTempoBpm` and `seqTempoBpm` are replaced by a
   single `masterTempoBpm` atomic. Arp and sequencer each keep their own
@@ -19,7 +19,7 @@ questions. Settled this session (user decision, not this doc's own call):
 - **(b) Still open, deliberately.** Whether glide time locks to tempo is
   explicitly **not** settled here — a different item, later.
 
-Two things the user asked for beyond the original TODO entry's wording:
+Two things the developer asked for beyond the original TODO entry's wording:
 
 - **LFO syncs to the master tempo, in multiples.** Satisfied by reusing
   `StepClock.h`'s existing `beatsPerStepForDivision`/`StepDivision` table —
@@ -32,7 +32,7 @@ Two things the user asked for beyond the original TODO entry's wording:
   there) — handled as a wholly separate, free-running-mode-only change:
   widen `lfoRateHz`'s knob floor. The two asks sound related but resolve to
   independent code paths; conflating them would have coupled "slow" to
-  "synced" when the user only asked for the latter to support multiples, not
+  "synced" when the developer only asked for the latter to support multiples, not
   for slow to require sync.
 
 > **Model note**: none of this is item 2 or item 5's own oscillator/filter/
@@ -48,9 +48,9 @@ Two things the user asked for beyond the original TODO entry's wording:
 
 | Decision | Choice | Reasoning |
 |---|---|---|
-| Master tempo | One `masterTempoBpm` atomic (default 120.0f, 20-300 BPM — same range `StepClock::setTempo` already clamps to) replaces `arpTempoBpm`/`seqTempoBpm` | User's explicit "single tempo dial" choice |
+| Master tempo | One `masterTempoBpm` atomic (default 120.0f, 20-300 BPM — same range `StepClock::setTempo` already clamps to) replaces `arpTempoBpm`/`seqTempoBpm` | Developer's explicit "single tempo dial" choice |
 | Clock ownership | Unchanged — `Arpeggiator` and `StepSequencer` keep fully independent `StepClock` instances and independent `Division` atomics | Only the BPM *source* is shared, not the clocks themselves; no test rig ever needs arp and seq at genuinely different tempos at once (checked: `SeqTransitionRig` already sets both to 300 BPM) |
-| Tempo knob placement | **Reconsidered 2026-08-30** (post-build, user call): moved to OUTPUT, next to Level. Originally landed in ARP (rename target only: `&arpTempoBpm` → `&masterTempoBpm`, label unchanged) — SEQUENCER's own Tempo knob was removed either way | ARP's placement was flagged at the time as "the simplest placement, not an independently-argued UX call" (zero layout-budget rework — SEQUENCER's row isn't width-budgeted, so losing a knob there doesn't touch row B's width). It read wrong once built: masterTempoBpm is a global control (arp, sequencer, synced LFO), and living in ARP implied arp-ownership. OUTPUT's plain global-controls cluster carries no such implication. Row A's `envRowWidthCompensation` was rebalanced (28px → 204px) in the same pass so row A/B stay pixel-matched |
+| Tempo knob placement | **Reconsidered 2026-08-30** (post-build, developer call): moved to OUTPUT, next to Level. Originally landed in ARP (rename target only: `&arpTempoBpm` → `&masterTempoBpm`, label unchanged) — SEQUENCER's own Tempo knob was removed either way | ARP's placement was flagged at the time as "the simplest placement, not an independently-argued UX call" (zero layout-budget rework — SEQUENCER's row isn't width-budgeted, so losing a knob there doesn't touch row B's width). It read wrong once built: masterTempoBpm is a global control (arp, sequencer, synced LFO), and living in ARP implied arp-ownership. OUTPUT's plain global-controls cluster carries no such implication. Row A's `envRowWidthCompensation` was rebalanced (28px → 204px) in the same pass so row A/B stay pixel-matched |
 | LFO sync ratio | New `lfoSyncEnabled` (int, default 0) + `lfoSyncDivision` (int, default `StepDivision::Sixteenth`) atomics, reusing `StepDivision`/`beatsPerStepForDivision` as-is | Matches arp/seq's own default convention; "off on first load" matches arpEnabled/seqEnabled/seqRecordArmed |
 | LFO sync computation | Lives at the existing `lfo.setRate(...)` call site (`SynthVoice.cpp:187-191`), not inside `Lfo` itself | `beatsPerStepForDivision` is a free `constexpr` function (`StepClock.h:30-50`) — no new `StepClock` instance needed |
 | LFO free-run floor | Widen `lfoKnobSpecs`' Rate row min from 0.02 Hz to ~0.005 Hz (~200s cycle), add `skewMidpoint = sqrt(min*max)` (≈0.316) | `Lfo::setRate` has no internal clamp — the knob range is the only enforcement today; skew matches Cutoff/Attack/Decay/Release's existing geometric-mean convention so the wider low end isn't crammed into the first few pixels of travel |
@@ -164,7 +164,7 @@ Tempo knob (`numSeqKnobs` 2→1) needs no compensation there at all.
   changes only — nothing to `jassert` there. Flagged per CLAUDE.md's "What
   you cannot verify": whether the new floor actually *sounds* usefully
   slower, and whether the relocated Tempo knob reads sensibly in the panel,
-  are both ears/eyes judgements only the user can make.
+  are both ears/eyes judgements only the developer can make.
 
 ---
 

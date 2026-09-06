@@ -396,13 +396,20 @@ struct VoiceParameters
     // doc's scope-cut note for what else it will eventually gate.
     std::atomic<int> vimEnabled { 0 };
 
-    // Tier 2 (A1 - filter drive/saturation): knob-only, no separate toggle -
-    // 0 default is inert, the same "0 = no effect" convention every other
-    // depth knob here already uses (envToCutoffDepthOctaves,
-    // lfoToPitchDepthOctaves, ...). Smoothed like the other Tier 2/depth
-    // knobs - an unsmoothed drive jump would thump the filter's feedback
-    // loop the same way an unsmoothed resonance jump does.
-    std::atomic<float> filterDriveAmount { 0.0f };
+    // Tier 2 (A1 - drive/distortion). REVISED THREE TIMES - see
+    // Source/DSP/Drive.h's own comment for the full history. Settled design:
+    // a plain gain-into-clip distortion stage (Drive::processSample) applied
+    // by SynthVoice AFTER the filter, just before the VCA - "a pedal at the
+    // output", independent of cutoff/resonance position, rather than
+    // "driving the filter's own maths" (the original, removed design) or
+    // sitting pre-filter where the VCF could remove the very harmonics it
+    // just added (the second, also-removed design). Knob-only, no separate
+    // toggle - 0 default is an exact bypass, the same "0 = no effect"
+    // convention every other depth knob here already uses
+    // (envToCutoffDepthOctaves, lfoToPitchDepthOctaves, ...). Smoothed like
+    // the other Tier 2/depth knobs - an unsmoothed jump into a nonlinear
+    // shaper would click.
+    std::atomic<float> driveAmount { 0.0f };
 
     // Tier 2 (B2 - humanise): ONE knob for v1, not Swing/Timing Jitter/
     // Velocity Jitter as three separate amounts - see the doc's scope-cut

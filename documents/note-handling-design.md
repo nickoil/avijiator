@@ -671,7 +671,7 @@ re-checking the moment any MIDI device is to hand.
   the "time constant" claim concrete and checkable, mirroring item 3's retrigger-click
   test.
 
-### Taste — the user's call alone
+### Taste — the developer's call alone
 
 Which priority mode feels right (this settles architecture.md's open decision by ear);
 whether Retrigger-as-default was the right call; glide feel and whether constant-rate

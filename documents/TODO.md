@@ -93,7 +93,7 @@ Build/validate everything here before touching Android.
       (b) **Untested end-to-end with MIDI hardware and unverified by ear** — the
       listening tests in arpeggiator-design.md section 12 (division timing,
       up-down endpoints, hold rule "feel", whether it's in the SH-101 family)
-      are the user's to run.
+      are the developer's to run.
 - [x] **6. UI pass** — knobs/controls for what's built so far, mouse-driven;
       keep touch-first layout decisions in mind even though untested.
       Design + build order: [ui-design.md](ui-design.md); settled decisions
@@ -114,7 +114,7 @@ Build/validate everything here before touching Android.
       focus and QWERTY note input silently died after the first click —
       fixed with an explicit `visibilityChanged()` override.
       **Not verified this session**: a Debug + Release rebuild was skipped
-      because `Avijiator.exe` was already running (user's own manual test)
+      because `Avijiator.exe` was already running (developer's own manual test)
       and locking the link step — Debug compiled clean up to that point
       (Main.cpp, MainComponent.cpp, SynthPanel.cpp all built) but the link
       and the Release config weren't re-confirmed here. Worth a rebuild
@@ -208,7 +208,7 @@ Build/validate everything here before touching Android.
       re-verified against a MIDI hardware or on a full `cdb.exe` pass since
       the octave-range/gate-odds edit.
       **Regression found and fixed 2026-09-01**: the Division combo showed
-      NO selection after clicking Autoviji - found by the user, not by any
+      NO selection after clicking Autoviji - found by the developer, not by any
       self-test (this button's own widget-sync line has never had one - see
       `randomizeSequence`'s comment). Root cause: `randomizeSequence` set
       `seqChoices[0].comboBox`'s selected id to
@@ -226,7 +226,7 @@ Build/validate everything here before touching Android.
       hits, though this class of bug wouldn't have fired one anyway - it's a
       display bug, not a crash); **not yet re-confirmed visually** that the
       Division combo now shows "1/8T" after clicking Autoviji - that's the
-      user's own eyes to make.
+      developer's own eyes to make.
 - [x] **9. Settings Persistence** — Design + build order:
       [settings-persistence-design.md](settings-persistence-design.md). Built
       2026-09-01, all 7 build steps done. Two tiers sharing one
@@ -284,7 +284,8 @@ Build/validate everything here before touching Android.
       unchecked because it still lists the FULL spec, and v1 is deliberately
       a subset): `Vcf::driveSaturate` (A1 — pushes the existing feedback-loop
       `softClip` harder via a caller-supplied 0..1 drive, exactly
-      `softClip(x)` at 0); `Adsr::setCurveEnabled` (A2 — exponential
+      `softClip(x)` at 0 — **REVISED TWICE since, see the 2026-09-06 note
+      below; `driveSaturate` no longer exists**); `Adsr::setCurveEnabled` (A2 — exponential
       Decay/Release, gated by the new `vimEnabled` atomic, linear/unchanged
       when off); `Humanise::onsetDelaySamples`/`velocityJitterFactor`
       (B2 — one `humaniseAmount` knob driving swing + timing jitter + velocity
@@ -297,7 +298,8 @@ Build/validate everything here before touching Android.
       and OUTPUT, picked up by preset save/load automatically (`SynthPanel::
       forEachSerializableParameter`, no separate serializer change needed).
       Seven new Debug self-tests (`runAdsrCurveSelfTest`,
-      `runVcfDriveSelfTest`, `runChorusSelfTest`, `runHumaniseFormulaSelfTest`,
+      `runVcfDriveSelfTest` (**removed 2026-09-06 along with the function it
+      tested**), `runChorusSelfTest`, `runHumaniseFormulaSelfTest`,
       `runArpHumaniseSelfTest`, `runSeqHumaniseSelfTest`, plus the existing
       six survived unchanged) prove each new mechanism inert at its knob's
       default and, for the humanise scheduling specifically, that a pending
@@ -309,7 +311,7 @@ Build/validate everything here before touching Android.
       assertion hits across all 15 self-tests — and a real launch (Debug and
       Release) with no crash.
       **Rest of Tier 1 built 2026-09-05** (same session's follow-up, after
-      the user asked "how much to do those other things" and confirmed):
+      the developer asked "how much to do those other things" and confirmed):
       `OscillatorDrift` (A3 — a bounded leaky-integrator random walk, NOT a
       free-running accumulator; the main oscillator's own instance lives in
       `SynthVoice` as an additive-octaves pitch term, exactly like every
@@ -330,7 +332,7 @@ Build/validate everything here before touching Android.
       `renderVoiceBlock` and before `Chorus`). All three gated by the SAME
       `vimEnabled` read already wired for A2 — no new controls, exactly Tier
       1's own "one switch, no sub-parameters" design. Two design questions
-      (asked of, and settled by, the user rather than guessed at) are on
+      (asked of, and settled by, the developer rather than guessed at) are on
       record in character-and-vim.md's build note: sub-oscillator drift's
       bounded-phase-wobble approach, and A5 (component-bleed) staying
       deferred as too vague to build safely this session.
@@ -339,6 +341,48 @@ Build/validate everything here before touching Android.
       integration proof through `SynthVoice`, alongside the four above) — 18
       total now, all clean via `cdb.exe`. Builds clean (Debug + Release, zero
       warnings); Release launched and stayed up with no crash.
+      **A1 (Drive) revised three times, 2026-09-06** — the developer found the
+      feedback-loop version "pointless" (only ever coloured cutoff/resonance
+      interaction) and asked for "a distortion pedal... signal gets louder
+      and dirtier" instead. First replacement moved it pre-filter but kept a
+      makeup-gain instinct (crossfading toward a fixed-hardness shaper) that
+      still didn't get louder — caught by the developer's own listening, not by a
+      self-test, since "byte-identical at 0, bounded, non-silent" all held
+      and none of that proves loudness grows with drive. Fixed (real
+      gain-into-clip, no makeup gain) — but a THIRD round of feedback ("still
+      does not sound like a grungy distortion pedal... sounds cleaner when
+      on... is it now independent of the filters?") caught a placement bug
+      the self-tests couldn't see either: pre-filter, the VCF running
+      immediately after Drive could remove exactly the harmonics Drive had
+      just added whenever cutoff was not wide open — the reported "cleaner"
+      symptom.
+      **Settled design**: new `Source/DSP/Drive.h`, `Vcf::driveSaturate`/
+      `maxDriveGain` removed entirely from `Vcf.cpp` (back to exactly its
+      pre-A1 state), `Drive::processSample` applied by `SynthVoice`
+      **AFTER** the filter, immediately before the VCA — "a pedal at the
+      output", independent of cutoff/resonance position, not "drive into the
+      filter". Real gain-into-clip with NO makeup gain (`tanh(x *
+      driveGain)`, driveGain up to 10x, output used as-is) — level and grit
+      rise together, matching a real overdrive stage. `driveAmount == 0` is
+      an explicit early-return bypass (not an arithmetic near-identity),
+      still exact regardless of input level; above 0 the transfer function
+      is deliberately NOT required to be continuous with the off case - a
+      real drive pedal's low end isn't silky either.
+      `VoiceParameters::filterDriveAmount` renamed to `driveAmount` (safe for
+      existing presets - the serialized key comes from the knob's display
+      name, "Drive", not the C++ member name). `runVcfDriveSelfTest` removed;
+      `runDriveSelfTest` (Drive.cpp, proves bypass-at-0 and, specifically,
+      that PEAK LEVEL rises with driveAmount) and `runDriveIntegrationSelfTest`
+      (SynthVoice.cpp — now THREE cases: byte-identical at 0, louder at wide-
+      open cutoff, and louder at MOSTLY CLOSED cutoff too — that last case is
+      the actual regression test for the placement bug, not just a repeat of
+      the first two properties) take its place - **20 total** self-tests, two
+      real bugs caught along the way (a `< 1.0f` bound in the drive self-test
+      itself failed on inputs where `tanh` rounds to exactly `1.0f` in
+      float32, fixed to `<=`; and the placement bug itself, which no
+      self-test could catch — only the developer's ear, at a cutoff setting that
+      wasn't wide open). Builds clean (Debug + Release, zero warnings);
+      verified via `cdb.exe` (0 assertion hits) and a real Release launch.
       **Deliberately deferred, not forgotten** (see the design doc's own
       scope-cut list): A5 (component-bleed — explicitly too vague to build
       safely, see above), oversampling (A4), per-note randomisation (B3), mod
@@ -350,7 +394,7 @@ Build/validate everything here before touching Android.
       envelopes, chorus, humanised timing, oscillator drift, the velocity
       curve, output noise floor/saturation — actually sounds "in the family"
       with an SH-101/analogue reference, or just different. CLAUDE.md's "what
-      you cannot verify" section reserves that listening test for the user;
+      you cannot verify" section reserves that listening test for the developer;
       it applies to this item more than most. Also untested against MIDI
       hardware this session.
 
@@ -374,7 +418,7 @@ Build/validate everything here before touching Android.
       isn't budgeted). The Tempo knob itself first landed in ARP (repointed
       to `masterTempoBpm`, label/position unchanged, flagged as the simplest
       placement rather than an argued one), then moved to OUTPUT next to
-      Level on 2026-08-30 once the user judged ARP misleading for a
+      Level on 2026-08-30 once the developer judged ARP misleading for a
       global-tempo knob (`numArpKnobs` 2→1, `numOutputKnobs` 1→2).
       LFO gains `lfoSyncEnabled`/`lfoSyncDivision` atomics and a
       `SynthVoice.cpp` computation (right at the existing `lfo.setRate` call
@@ -521,7 +565,7 @@ Build/validate everything here before touching Android.
       though, not a depth or a flag, so its zero-init isn't neutral - it's a
       real value, `2^0 = 1 Hz`, roughly five octaves below anything reachable
       via the keyboard (`VoiceParameters::minMasterOctaveShift = -2` floors
-      out at MIDI 24, ≈33 Hz). Found 2026-08-28 via a user bug report ("sequencer
+      out at MIDI 24, ≈33 Hz). Found 2026-08-28 via a developer bug report ("sequencer
       just clicks, keyboard plays a nice clear note") that took most of a
       session to trace: a step whose gate is switched on by a plain click in
       the grid (`SynthPanel.cpp`'s `StepCell::mouseUp`, which only ever
