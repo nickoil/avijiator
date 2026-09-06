@@ -22,7 +22,7 @@ came up during design:
   precedent in this codebase (`MainComponent`'s device-settings code, see
   section 3). `juce::ValueTree` has zero uses anywhere in `Source/` — not
   introduced here for no benefit.
-- **(b) Factory presets live in the developer's settings folder, written at first
+- **(b) Factory presets live in the user's settings folder, written at first
   launch — not embedded `BinaryData`.** Editable in place, no rebuild to tweak
   a preset; revisit embedding only if this app is ever actually distributed
   (`architecture.md`'s licensing section is explicit that nothing there
@@ -132,16 +132,16 @@ the app is interactive), saved in the destructor alongside
 `deviceManager.createStateXml()`, via `appProperties.saveIfNeeded()`. No new
 UI.
 
-**Tier B — named presets.** Developer-facing save-as/load/browse/delete, backed by
+**Tier B — named presets.** User-facing save-as/load/browse/delete, backed by
 one file per preset (not one big blob) in a new `Presets/` folder alongside
 the existing `ApplicationProperties` settings folder — independently
-shareable/deletable, and consistent with "developer-folder, editable in place"
+shareable/deletable, and consistent with "user-folder, editable in place"
 from section 1. UI shape: see section 6.
 
 Both tiers call the **same** `toXml(const VoiceParameters&, const
 Arpeggiator&)` / `fromXml(const juce::XmlElement&, VoiceParameters&,
 Arpeggiator&)` pair (section 4) — Tier A is simply an anonymous preset saved
-under a fixed key instead of a developer-chosen filename.
+under a fixed key instead of a user-chosen filename.
 
 ---
 
@@ -389,7 +389,7 @@ serializer/UI/factory-bank code across the flat `Source/` root).
 
 ## 9. Factory preset bank
 
-A curated starting set, written to the same developer-folder `Presets/` location
+A curated starting set, written to the same user-folder `Presets/` location
 (section 3) at first launch if that folder doesn't yet exist — not embedded
 `BinaryData`, per section 1's settled decision. Content (which patches, how
 many) is implementation-time work, not fixed here.
@@ -458,7 +458,7 @@ discipline as every other self-test in this codebase
    restores it, provable via the self-test's second scenario.
 4. **Preset browser UI.** Section 6's dialog — save-as/load/list/delete.
    **Done when**: Tier B is usable end-to-end from the panel.
-5. **Factory preset bank.** Section 9 — a curated set written to the developer
+5. **Factory preset bank.** Section 9 — a curated set written to the user
    folder on first launch.
 6. **Self-tests.** Section 10, both scenarios, verified clean via `cdb.exe`
    per this project's headless-verification convention.

@@ -383,6 +383,22 @@ Build/validate everything here before touching Android.
       self-test could catch — only the developer's ear, at a cutoff setting that
       wasn't wide open). Builds clean (Debug + Release, zero warnings);
       verified via `cdb.exe` (0 assertion hits) and a real Release launch.
+      **Real crash found and fixed, 2026-09-06** (unrelated to Drive - a
+      pre-existing `Chorus` bug from B1, coincidentally hit while the
+      developer was turning the Drive knob): `Chorus::readDelayed`'s
+      negative-position wrap (`pos += bufferSize`) can round a value just
+      UNDER `bufferSize` UP to exactly `bufferSize` at float32 precision -
+      MSVC's checked `<array>` caught it as "array subscript out of range" at
+      runtime (`buffer[bufferSize]`, one past the end). Not a rare corner
+      case - it fires every time the chorus's LFO-modulated read position
+      crosses zero, which happens on every LFO cycle (~1.67s) whenever
+      Chorus is on. Fixed with a second, defensive re-wrap after the first.
+      **`runChorusSelfTest` itself was the reason this wasn't caught
+      earlier**: it only ran 0.1s of audio, never once reaching a zero
+      crossing - extended to 4s (several full LFO cycles) so it actually
+      exercises the code path that crashed. Verified via `cdb.exe` (0
+      assertion hits, where the un-fixed code reliably fired one) and a real
+      Release launch.
       **Deliberately deferred, not forgotten** (see the design doc's own
       scope-cut list): A5 (component-bleed — explicitly too vague to build
       safely, see above), oversampling (A4), per-note randomisation (B3), mod

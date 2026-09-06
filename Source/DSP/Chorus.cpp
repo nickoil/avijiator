@@ -9,7 +9,13 @@ void runChorusSelfTest()
     Chorus chorus;
     chorus.prepare (48000.0);
 
-    constexpr int numSamples = 4800; // 0.1s - several LFO phase steps at 0.6Hz
+    // 4 seconds - several FULL LFO cycles (period ~1.67s at 0.6Hz), not just a
+    // few phase steps. Load-bearing: the original 0.1s version of this test
+    // never once let the read position cross zero, so it never reached the
+    // exact floating-point rounding edge case (readDelayed's own comment)
+    // that crashed in real use - caught by the user hitting it while playing,
+    // not by this self-test, until the duration was fixed here.
+    constexpr int numSamples = 192000;
 
     auto everFinite = true;
     auto everDiverged = false;

@@ -88,6 +88,16 @@ private:
         if (pos < 0.0f)
             pos += (float) bufferSize;
 
+        // Defensive re-wrap: the += above adds a large constant (bufferSize)
+        // to a much smaller value, and float32 rounding at that magnitude can
+        // round a result just UNDER bufferSize UP to exactly bufferSize -
+        // observed in practice as an out-of-bounds buffer[bufferSize] read
+        // (MSVC's checked <array> caught it as "array subscript out of
+        // range"). Not a rare corner case: this fires every time the read
+        // position crosses zero, which happens on every LFO cycle.
+        if (pos >= (float) bufferSize)
+            pos -= (float) bufferSize;
+
         const auto index0 = (int) pos;
         const auto frac = pos - (float) index0;
         const auto index1 = (index0 + 1) % bufferSize;
