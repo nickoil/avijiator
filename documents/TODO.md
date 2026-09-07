@@ -258,7 +258,7 @@ Build/validate everything here before touching Android.
       `runPresetRoundTripSelfTest`), and a real end-to-end run confirming the
       `Presets/` folder, both factory presets, and the `synthState` key all
       wrote correctly to `%APPDATA%/Avijiator/`.
-- [ ] **10. Character & "Vim"** — analogue realism + performance-feel layer on
+- [x] **10. Character & "Vim"** — analogue realism + performance-feel layer on
       top of the clean core voice: filter feedback saturation, exponential
       envelope curves, oscillator drift, output noise floor/saturation,
       humanised arp/seq timing, chorus, per-note randomisation, mod
@@ -597,7 +597,7 @@ Build/validate everything here before touching Android.
       gate-on gesture snap pitch up to a default if it's still at the raw
       zero. Out of scope for whichever numbered item is active when this is
       picked up
-- [ ] **Octave transpose promoted to one shared, global control** — moved
+- [x] **Octave transpose promoted to one shared, global control** — moved
       from `QwertyNoteInput`-owned + `SynthPanel`-mirrored dual state to
       `VoiceParameters::masterOctaveShift`, applied uniformly to QWERTY,
       on-screen keyboard, MIDI hardware input, the arpeggiator, and the step
