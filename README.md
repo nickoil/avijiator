@@ -23,6 +23,20 @@ will drift out of date as work continues, the checklist won't.
 Next up: settings persistence / presets (item 8), then internal tempo sync
 for LFO/arp/glide.
 
+## Licence
+
+Avijiator is licensed under the [GNU AGPLv3](LICENSE).
+
+This project is built on [JUCE](https://juce.com) (`libs/JUCE`, dual-licensed
+AGPLv3/commercial — used here under AGPLv3) and, on Windows, links against
+Steinberg's ASIO SDK (`libs/JUCE/modules/juce_audio_devices/native/asio`),
+which Steinberg licenses either under its own proprietary terms or under
+GPLv3 — this project uses the GPLv3 option. AGPLv3 §13 permits combining
+AGPLv3 code with GPLv3-only code, with the combined work distributed under
+AGPLv3, which is what the top-level [LICENSE](LICENSE) here reflects.
+
+"ASIO" is a trademark of Steinberg Media Technologies GmbH.
+
 ## Platform plan
 
 Developed first as a **Windows standalone app** (VS Code + CMake) for fast
